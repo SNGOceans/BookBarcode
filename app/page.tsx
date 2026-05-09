@@ -170,7 +170,7 @@ export default function HomePage() {
       header.height = 30;
       header.font   = { name: '맑은 고딕', size: 11, bold: true, color: { argb: 'FFFFFFFF' } };
       header.fill   = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF7C3AED' } };
-      header.alignment = { horizontal: 'center', vertical: 'center' };
+      header.alignment = { horizontal: 'center', vertical: 'middle' };
 
       // 데이터 (오래된 것부터 위)
       const ordered = books.slice().reverse();
@@ -194,7 +194,7 @@ export default function HomePage() {
         row.height = 25;
         row.font   = { name: '맑은 고딕', size: 10 };
         // 모든 셀 좌측 정렬로 통일
-        row.alignment = { horizontal: 'left', vertical: 'center', wrapText: true, indent: 1 };
+        row.alignment = { horizontal: 'left', vertical: 'middle', wrapText: true, indent: 1 };
         // ISBN 은 등폭 글꼴이 보기 좋음
         row.getCell('isbn').font = { name: 'Consolas', size: 10 };
 

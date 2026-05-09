@@ -193,20 +193,8 @@ export default function HomePage() {
         });
         row.height = 25;
         row.font   = { name: '맑은 고딕', size: 10 };
-        // 긴 텍스트(도서명/저자/평역자/출판사)는 좌측 + wrap
+        // 모든 셀 좌측 정렬로 통일
         row.alignment = { horizontal: 'left', vertical: 'center', wrapText: true, indent: 1 };
-
-        // 짧은 식별자·숫자·시각 컬럼은 가운데 정렬
-        const centerKeys = [
-          'no', 'isbn',
-          'price_standard', 'price_sales',
-          'used_price', 'used_min_price', 'used_count',
-          'scan_count',
-          'first_scanned_at', 'last_scanned_at',
-        ];
-        for (const k of centerKeys) {
-          row.getCell(k).alignment = { horizontal: 'center', vertical: 'center' };
-        }
         // ISBN 은 등폭 글꼴이 보기 좋음
         row.getCell('isbn').font = { name: 'Consolas', size: 10 };
 

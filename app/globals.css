@@ -24,13 +24,13 @@ html, body {
 }
 
 .scanner { position: relative; width: 100%; aspect-ratio: 4 / 3; background: #000; overflow: hidden; }
-.scanner-viewport { position: absolute; inset: 0; }
-.scanner-viewport video, .scanner-viewport canvas {
-  position: absolute; top: 0; left: 0;
+.scanner-video {
+  position: absolute; inset: 0;
   width: 100% !important; height: 100% !important;
   object-fit: cover;
+  z-index: 1;
 }
-.scanner-viewport canvas.drawingBuffer { z-index: 2; }
+.scanner-canvas { display: none; }
 .scan-frame {
   position: absolute; inset: 14% 10%;
   border: 2px solid rgba(56, 189, 248, .9);

@@ -1,6 +1,5 @@
 -- ============================================================
--- BookBarcode :: schema with auth + per-user RLS
--- 안전 재실행을 위해 기존 객체 먼저 제거 (테스트 단계 전제)
+-- BookBarcode :: schema with auth + per-user RLS + Aladin meta
 -- ============================================================
 
 drop function if exists public.record_scan(text)             cascade;
@@ -8,9 +7,7 @@ drop function if exists public.update_books_on_scan()        cascade;
 drop table    if exists public.scans                         cascade;
 drop table    if exists public.books                         cascade;
 
--- ------------------------------------------------------------
--- 1) books : (user_id, isbn) 당 1 row + 카운터
--- ------------------------------------------------------------
+-- 1) books : (user_id, isbn) 당 1 row + 카운터 + Aladin 메타 캐시
 create table public.books (
   id               bigserial   primary key,
   user_id          uuid        not null references auth.users(id) on delete cascade,
@@ -18,13 +15,22 @@ create table public.books (
   scan_count       int         not null default 1,
   first_scanned_at timestamptz not null default now(),
   last_scanned_at  timestamptz not null default now(),
+  -- Aladin meta (스캔 후 한 번만 채워짐, meta_fetched_at != null 이면 fetched)
+  title            text,
+  author           text,
+  publisher        text,
+  cover_url        text,
+  price_standard   int,
+  price_sales      int,
+  used_price       int,
+  used_min_price   int,
+  used_count       int,
+  meta_fetched_at  timestamptz,
   unique (user_id, isbn)
 );
 create index books_user_last_idx on public.books (user_id, last_scanned_at desc);
 
--- ------------------------------------------------------------
--- 2) scans : 매 스캔 이벤트 이력 (raw)
--- ------------------------------------------------------------
+-- 2) scans : 매 스캔 이벤트 이력
 create table public.scans (
   id         bigserial   primary key,
   user_id    uuid        not null references auth.users(id) on delete cascade,
@@ -34,10 +40,7 @@ create table public.scans (
 create index scans_user_time_idx on public.scans (user_id, scanned_at desc);
 create index scans_user_isbn_idx on public.scans (user_id, isbn);
 
--- ------------------------------------------------------------
--- 3) record_scan(p_isbn) : 호출자(auth.uid())의 데이터로 기록
---    SECURITY INVOKER → RLS 적용. 미인증이면 raise.
--- ------------------------------------------------------------
+-- 3) record_scan(p_isbn) : auth.uid() 의 데이터로 기록 (트랜잭션)
 create or replace function public.record_scan(p_isbn text)
 returns public.books
 language plpgsql
@@ -66,9 +69,7 @@ begin
 end;
 $$;
 
--- ------------------------------------------------------------
--- 4) RLS : 본인 row 만 접근 가능
--- ------------------------------------------------------------
+-- 4) RLS
 alter table public.books enable row level security;
 alter table public.scans enable row level security;
 
@@ -88,8 +89,6 @@ create policy scans_own_insert on public.scans
 create policy scans_own_delete on public.scans
   for delete using (auth.uid() = user_id);
 
--- ------------------------------------------------------------
--- 5) 권한 + PostgREST schema cache reload
--- ------------------------------------------------------------
+-- 5) 권한 + schema cache reload
 grant execute on function public.record_scan(text) to authenticated;
 notify pgrst, 'reload schema';

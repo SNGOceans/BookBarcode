@@ -12,9 +12,21 @@ type Book = {
   scan_count: number;
   first_scanned_at: string;
   last_scanned_at: string;
+  title:          string | null;
+  author:         string | null;
+  publisher:      string | null;
+  cover_url:      string | null;
+  price_standard: number | null;
+  price_sales:    number | null;
+  used_price:     number | null;
+  used_min_price: number | null;
+  used_count:     number | null;
+  meta_fetched_at: string | null;
 };
 
 type Me = { id: string; email: string };
+
+const wonFmt = (n: number) => `${n.toLocaleString('ko-KR')}원`;
 
 export default function HomePage() {
   const [me, setMe]               = useState<Me | null>(null);
@@ -24,7 +36,6 @@ export default function HomePage() {
   const [toast, setToast]         = useState<string | null>(null);
   const inflightRef               = useRef<Set<string>>(new Set());
 
-  // 페이지 진입 시 서버에 세션 확인
   useEffect(() => {
     fetch('/api/auth/me')
       .then((r) => r.json())
@@ -33,7 +44,6 @@ export default function HomePage() {
       .finally(() => setAuthReady(true));
   }, []);
 
-  // 인증 상태가 바뀌면 books 로드
   useEffect(() => {
     if (!me) { setBooks([]); return; }
     void load();
@@ -41,12 +51,8 @@ export default function HomePage() {
   }, [me?.id]);
 
   async function authedFetch(input: string, init?: RequestInit) {
-    // 같은 origin 이라 cookie 가 자동 첨부됨
     const res = await fetch(input, init);
-    if (res.status === 401) {
-      // 세션 만료 → 자동 로그아웃 처리
-      setMe(null);
-    }
+    if (res.status === 401) setMe(null);
     return res;
   }
 
@@ -81,7 +87,7 @@ export default function HomePage() {
       g.gain.linearRampToValueAtTime(0.15, ctx.currentTime + 0.01);
       g.gain.linearRampToValueAtTime(0, ctx.currentTime + 0.1);
       o.start(); o.stop(ctx.currentTime + 0.12);
-    } catch { /* ignore */ }
+    } catch {}
   }
 
   const handleDetect = useCallback(async (isbn: string) => {
@@ -104,7 +110,8 @@ export default function HomePage() {
         const next = prev.filter((b) => b.id !== book.id);
         return [book, ...next].slice(0, 1000);
       });
-      showToast(`✔ ${book.isbn}${book.scan_count > 1 ? ` ×${book.scan_count}` : ''}`);
+      const label = book.title ?? book.isbn;
+      showToast(`✔ ${label}${book.scan_count > 1 ? ` ×${book.scan_count}` : ''}`);
       feedback(true);
     } catch {
       showToast('네트워크 오류');
@@ -122,22 +129,27 @@ export default function HomePage() {
 
   function exportCsv() {
     if (!books.length) return;
-    const rows = [['no', 'isbn', 'scan_count', 'first_scanned_at', 'last_scanned_at']];
+    const head = ['no', 'isbn', 'title', 'author', 'publisher',
+      'price_standard', 'price_sales', 'used_price', 'used_min_price', 'used_count',
+      'scan_count', 'first_scanned_at', 'last_scanned_at'];
+    const rows: string[][] = [head];
     [...books].reverse().forEach((b, i) =>
       rows.push([
         String(i + 1),
         b.isbn,
+        csv(b.title), csv(b.author), csv(b.publisher),
+        nstr(b.price_standard), nstr(b.price_sales),
+        nstr(b.used_price),     nstr(b.used_min_price), nstr(b.used_count),
         String(b.scan_count),
-        b.first_scanned_at,
-        b.last_scanned_at,
+        b.first_scanned_at, b.last_scanned_at,
       ]),
     );
-    const csv = '﻿' + rows.map((r) => r.join(',')).join('\r\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const csvText = '﻿' + rows.map((r) => r.join(',')).join('\r\n');
+    const blob = new Blob([csvText], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-    a.href = url; a.download = `barcodes-${stamp}.csv`;
+    a.href = url; a.download = `books-${stamp}.csv`;
     document.body.appendChild(a); a.click(); a.remove();
     URL.revokeObjectURL(url);
   }
@@ -148,9 +160,7 @@ export default function HomePage() {
     setMe(null);
   }
 
-  function onAuthed(user: Me) {
-    setMe(user);
-  }
+  function onAuthed(user: Me) { setMe(user); }
 
   const totalScans = books.reduce((acc, b) => acc + b.scan_count, 0);
 
@@ -202,20 +212,7 @@ export default function HomePage() {
         </div>
         {!books.length && <div className="empty">아직 스캔된 바코드가 없습니다.</div>}
         <ul>
-          {books.map((b) => (
-            <li key={b.id}>
-              <div className="info">
-                <span className="isbn">
-                  {b.isbn}
-                  {b.scan_count > 1 && <span className="count">×{b.scan_count}</span>}
-                </span>
-                <span className="time">
-                  {new Date(b.last_scanned_at).toLocaleString('ko-KR')}
-                </span>
-              </div>
-              <button className="del" onClick={() => void remove(b.id)} aria-label="삭제">✕</button>
-            </li>
-          ))}
+          {books.map((b) => <BookCard key={b.id} b={b} onRemove={() => void remove(b.id)} />)}
         </ul>
       </section>
 
@@ -223,3 +220,58 @@ export default function HomePage() {
     </main>
   );
 }
+
+function BookCard({ b, onRemove }: { b: Book; onRemove: () => void }) {
+  const hasCover = !!b.cover_url;
+  return (
+    <li className={'book-card' + (hasCover ? '' : ' no-cover')}>
+      {hasCover && (
+        <div className="cover">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={b.cover_url!} alt="" loading="lazy" referrerPolicy="no-referrer" />
+        </div>
+      )}
+      <div className="body">
+        <div className="title-row">
+          <h3 className="title">{b.title ?? '(메타 없음)'}</h3>
+          {b.scan_count > 1 && <span className="scan-count">×{b.scan_count}</span>}
+          <button className="del" onClick={onRemove} aria-label="삭제">✕</button>
+        </div>
+        {(b.author || b.publisher) && (
+          <div className="meta">
+            {b.author && <span>{b.author}</span>}
+            {b.publisher && <span>· {b.publisher}</span>}
+          </div>
+        )}
+        <div className="prices">
+          {b.price_standard != null && <Price label="정가"      value={wonFmt(b.price_standard)} />}
+          {b.price_sales    != null && <Price label="판매가"    value={wonFmt(b.price_sales)} />}
+          {b.used_price     != null && <Price label="중고가"    value={wonFmt(b.used_price)}     used />}
+          {b.used_min_price != null && <Price label="중고최저"  value={wonFmt(b.used_min_price)} used />}
+          {b.used_count     != null && <Price label="중고수량"  value={`${b.used_count.toLocaleString('ko-KR')}권`} used />}
+        </div>
+        <div className="card-footer">
+          <span className="isbn">{b.isbn}</span>
+          <span className="time">{new Date(b.last_scanned_at).toLocaleString('ko-KR')}</span>
+        </div>
+      </div>
+    </li>
+  );
+}
+
+function Price({ label, value, used }: { label: string; value: string; used?: boolean }) {
+  return (
+    <span className={'price' + (used ? ' used' : '')}>
+      <span className="price-label">{label}</span>
+      <span className="price-value">{value}</span>
+    </span>
+  );
+}
+
+function csv(s: string | null): string {
+  const v = s ?? '';
+  if (v.includes(',') || v.includes('"') || v.includes('\n'))
+    return `"${v.replace(/"/g, '""')}"`;
+  return v;
+}
+function nstr(n: number | null): string { return n == null ? '' : String(n); }

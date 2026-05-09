@@ -18,6 +18,7 @@ create table public.books (
   -- Aladin meta (스캔 후 한 번만 채워짐, meta_fetched_at != null 이면 fetched)
   title            text,
   author           text,
+  translator       text,
   publisher        text,
   cover_url        text,
   price_standard   int,

@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic';
 
 const BOOK_COLS =
   'id, isbn, scan_count, first_scanned_at, last_scanned_at, ' +
-  'title, author, publisher, cover_url, ' +
+  'title, author, translator, publisher, cover_url, ' +
   'price_standard, price_sales, used_price, used_min_price, used_count, ' +
   'meta_fetched_at';
 
@@ -56,6 +56,7 @@ export async function POST(req: NextRequest) {
       if (meta) {
         patch.title          = meta.title;
         patch.author         = meta.author;
+        patch.translator     = meta.translator;
         patch.publisher      = meta.publisher;
         patch.cover_url      = meta.cover_url;
         patch.price_standard = meta.price_standard;

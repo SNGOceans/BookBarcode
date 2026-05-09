@@ -14,6 +14,7 @@ type Book = {
   last_scanned_at: string;
   title:          string | null;
   author:         string | null;
+  translator:     string | null;
   publisher:      string | null;
   cover_url:      string | null;
   price_standard: number | null;
@@ -27,6 +28,12 @@ type Book = {
 type Me = { id: string; email: string };
 
 const wonFmt = (n: number) => `${n.toLocaleString('ko-KR')}원`;
+
+function pad2(n: number) { return String(n).padStart(2, '0'); }
+function stampNow(): string {
+  const d = new Date();
+  return `${d.getFullYear()}${pad2(d.getMonth() + 1)}${pad2(d.getDate())}_${pad2(d.getHours())}${pad2(d.getMinutes())}${pad2(d.getSeconds())}`;
+}
 
 export default function HomePage() {
   const [me, setMe]               = useState<Me | null>(null);
@@ -63,7 +70,7 @@ export default function HomePage() {
       const json = await res.json();
       if (!res.ok) { setBooks([]); return; }
       setBooks(json.books ?? []);
-    } catch { /* network */ }
+    } catch {}
   }
 
   function showToast(msg: string) {
@@ -132,48 +139,111 @@ export default function HomePage() {
     if (!books.length || exporting) return;
     setExporting(true);
     try {
-      // dynamic import 로 메인 번들에서 떼어내기 (첫 클릭 시에만 로드)
-      const writeXlsxFile = (await import('write-excel-file')).default;
+      // dynamic import 로 메인 번들에서 떼어내기
+      const ExcelJS = (await import('exceljs')).default;
 
-      const rows = books.slice().reverse().map((b, i) => ({
-        no:               i + 1,
-        isbn:             b.isbn,
-        title:            b.title          ?? '',
-        author:           b.author         ?? '',
-        publisher:        b.publisher      ?? '',
-        price_standard:   b.price_standard ?? null,
-        price_sales:      b.price_sales    ?? null,
-        used_price:       b.used_price     ?? null,
-        used_min_price:   b.used_min_price ?? null,
-        used_count:       b.used_count     ?? null,
-        scan_count:       b.scan_count,
-        first_scanned_at: b.first_scanned_at ? new Date(b.first_scanned_at) : null,
-        last_scanned_at:  b.last_scanned_at  ? new Date(b.last_scanned_at)  : null,
-      }));
+      const wb = new ExcelJS.Workbook();
+      const ws = wb.addWorksheet('도서 목록', {
+        views: [{ state: 'frozen', ySplit: 1 }],
+      });
 
-      type Row = typeof rows[number];
-      const schema: any[] = [
-        { column: 'No',         type: Number, value: (r: Row) => r.no,             width:  5,  align: 'right' },
-        { column: 'ISBN',       type: String, value: (r: Row) => r.isbn,           width: 16 },
-        { column: '도서명',      type: String, value: (r: Row) => r.title,          width: 36 },
-        { column: '저자',        type: String, value: (r: Row) => r.author,         width: 22 },
-        { column: '출판사',      type: String, value: (r: Row) => r.publisher,      width: 14 },
-        { column: '정가',        type: Number, value: (r: Row) => r.price_standard, width: 10, format: '#,##0' },
-        { column: '판매가',      type: Number, value: (r: Row) => r.price_sales,    width: 10, format: '#,##0' },
-        { column: '중고가',      type: Number, value: (r: Row) => r.used_price,     width: 10, format: '#,##0' },
-        { column: '중고최저가',  type: Number, value: (r: Row) => r.used_min_price, width: 12, format: '#,##0' },
-        { column: '중고수량',    type: Number, value: (r: Row) => r.used_count,     width: 10, format: '#,##0' },
-        { column: '스캔횟수',    type: Number, value: (r: Row) => r.scan_count,     width: 10, format: '#,##0' },
-        { column: '최초스캔',    type: Date,   value: (r: Row) => r.first_scanned_at, width: 22, format: 'yyyy-mm-dd hh:mm:ss' },
-        { column: '최근스캔',    type: Date,   value: (r: Row) => r.last_scanned_at,  width: 22, format: 'yyyy-mm-dd hh:mm:ss' },
+      // reference xlsx 컬럼 순서를 따르되, 권수/부권수는 빼고 ISBN 을 No 다음으로
+      ws.columns = [
+        { header: '번호',         key: 'no',               width:  6 },
+        { header: 'ISBN',         key: 'isbn',             width: 18 },
+        { header: '도서 제목',     key: 'title',            width: 40 },
+        { header: '저자',          key: 'author',           width: 20 },
+        { header: '평역자/옮김',   key: 'translator',       width: 20 },
+        { header: '출판사',        key: 'publisher',        width: 18 },
+        { header: '정가',          key: 'price_standard',   width: 12 },
+        { header: '판매가',        key: 'price_sales',      width: 12 },
+        { header: '중고가',        key: 'used_price',       width: 12 },
+        { header: '중고최저가',    key: 'used_min_price',   width: 12 },
+        { header: '중고수량',      key: 'used_count',       width: 10 },
+        { header: '스캔횟수',      key: 'scan_count',       width: 10 },
+        { header: '최초스캔',      key: 'first_scanned_at', width: 22 },
+        { header: '최근스캔',      key: 'last_scanned_at',  width: 22 },
       ];
 
-      const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-      await writeXlsxFile(rows, {
-        schema,
-        fileName: `books-${stamp}.xlsx`,
-        sheet: '도서 목록',
+      // 헤더 스타일 (reference 모방: 보라 배경, 흰 글자, 굵게, 가운데)
+      const header = ws.getRow(1);
+      header.height = 30;
+      header.font   = { name: '맑은 고딕', size: 11, bold: true, color: { argb: 'FFFFFFFF' } };
+      header.fill   = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF7C3AED' } };
+      header.alignment = { horizontal: 'center', vertical: 'center' };
+
+      // 데이터 (오래된 것부터 위)
+      const ordered = books.slice().reverse();
+      ordered.forEach((b, i) => {
+        const row = ws.addRow({
+          no:               i + 1,
+          isbn:             b.isbn,
+          title:            b.title          ?? '',
+          author:           b.author         ?? '',
+          translator:       b.translator     ?? '',
+          publisher:        b.publisher      ?? '',
+          price_standard:   b.price_standard,
+          price_sales:      b.price_sales,
+          used_price:       b.used_price,
+          used_min_price:   b.used_min_price,
+          used_count:       b.used_count,
+          scan_count:       b.scan_count,
+          first_scanned_at: b.first_scanned_at ? new Date(b.first_scanned_at) : null,
+          last_scanned_at:  b.last_scanned_at  ? new Date(b.last_scanned_at)  : null,
+        });
+        row.height    = 25;
+        row.font      = { name: '맑은 고딕', size: 10 };
+        row.alignment = { vertical: 'center', wrapText: true };
+        row.getCell('no').alignment = { horizontal: 'center', vertical: 'center' };
+
+        // 가격 천단위 콤마
+        for (const k of ['price_standard', 'price_sales', 'used_price', 'used_min_price', 'used_count', 'scan_count']) {
+          const cell = row.getCell(k);
+          if (typeof cell.value === 'number') cell.numFmt = '#,##0';
+        }
+        // 시각 포맷
+        for (const k of ['first_scanned_at', 'last_scanned_at']) {
+          const cell = row.getCell(k);
+          if (cell.value instanceof Date) cell.numFmt = 'yyyy-mm-dd hh:mm:ss';
+        }
+
+        // 가격 누락이면 핑크, 그 외 짝수 행은 옅은 보라
+        const hasPrice = b.price_standard != null || b.price_sales != null;
+        const fillArgb = !hasPrice ? 'FFFFB6C1' : ((i + 1) % 2 === 0 ? 'FFF3F0FF' : null);
+        if (fillArgb) {
+          row.eachCell((cell) => {
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: fillArgb } };
+          });
+        }
       });
+
+      // 모든 셀 thin border
+      const lastCol = ws.columnCount;
+      const lastRow = ws.rowCount;
+      for (let r = 1; r <= lastRow; r++) {
+        const row = ws.getRow(r);
+        for (let c = 1; c <= lastCol; c++) {
+          row.getCell(c).border = {
+            top:    { style: 'thin', color: { argb: 'FFD0D0D0' } },
+            left:   { style: 'thin', color: { argb: 'FFD0D0D0' } },
+            bottom: { style: 'thin', color: { argb: 'FFD0D0D0' } },
+            right:  { style: 'thin', color: { argb: 'FFD0D0D0' } },
+          };
+        }
+      }
+      ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: lastRow, column: lastCol } };
+
+      // 다운로드
+      const buf = await wb.xlsx.writeBuffer();
+      const blob = new Blob([buf], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `도서목록_${stampNow()}.xlsx`;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
     } catch (e: any) {
       showToast(`내보내기 실패: ${e?.message ?? e}`);
     } finally {
@@ -266,9 +336,10 @@ function BookCard({ b, onRemove }: { b: Book; onRemove: () => void }) {
           {b.scan_count > 1 && <span className="scan-count">×{b.scan_count}</span>}
           <button className="del" onClick={onRemove} aria-label="삭제">✕</button>
         </div>
-        {(b.author || b.publisher) && (
+        {(b.author || b.translator || b.publisher) && (
           <div className="meta">
             {b.author && <span>{b.author}</span>}
+            {b.translator && <span>· {b.translator} 옮김</span>}
             {b.publisher && <span>· {b.publisher}</span>}
           </div>
         )}

@@ -23,9 +23,19 @@ export default function AuthForm({ onAuthed }: Props) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ mode, email, password }),
       });
-      const json = await res.json();
+
+      // 빈 본문 / non-JSON 응답에도 안전하게 파싱
+      const text = await res.text();
+      let json: any = {};
+      if (text) {
+        try { json = JSON.parse(text); }
+        catch { /* keep raw text below */ }
+      }
+
       if (!res.ok) {
-        setErr(json.error ?? `오류 ${res.status}`);
+        const msg = json?.error
+          ?? (text ? text.slice(0, 300) : `HTTP ${res.status}`);
+        setErr(msg);
         return;
       }
       if (json.needs_confirmation) {

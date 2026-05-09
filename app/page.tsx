@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
+import AuthForm from '@/components/AuthForm';
 
 const Scanner = dynamic(() => import('@/components/Scanner'), { ssr: false });
 
@@ -13,20 +14,73 @@ type Book = {
   last_scanned_at: string;
 };
 
-export default function HomePage() {
-  const [books, setBooks] = useState<Book[]>([]);
-  const [active, setActive] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
-  const inflightRef = useRef<Set<string>>(new Set());
+type Auth = {
+  token: string;
+  refresh: string;
+  user: { id: string; email: string };
+};
 
-  useEffect(() => { void load(); }, []);
+const STORE_KEY = 'bb:auth:v1';
+
+function loadAuth(): Auth | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(STORE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch { return null; }
+}
+function saveAuth(a: Auth | null) {
+  if (typeof window === 'undefined') return;
+  if (a) localStorage.setItem(STORE_KEY, JSON.stringify(a));
+  else   localStorage.removeItem(STORE_KEY);
+}
+
+export default function HomePage() {
+  const [auth, setAuth]           = useState<Auth | null>(null);
+  const [authReady, setAuthReady] = useState(false);
+  const [books, setBooks]         = useState<Book[]>([]);
+  const [active, setActive]       = useState(false);
+  const [toast, setToast]         = useState<string | null>(null);
+  const inflightRef               = useRef<Set<string>>(new Set());
+
+  // 페이지 진입 시 localStorage 에서 세션 복원
+  useEffect(() => {
+    setAuth(loadAuth());
+    setAuthReady(true);
+  }, []);
+
+  // 인증 상태가 바뀌면 books 다시 로드
+  useEffect(() => {
+    if (!auth) { setBooks([]); return; }
+    void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [auth?.user.id]);
+
+  async function authedFetch(input: string, init?: RequestInit) {
+    const token = auth?.token;
+    const res = await fetch(input, {
+      ...init,
+      headers: {
+        ...(init?.headers ?? {}),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+    });
+    if (res.status === 401) {
+      // 토큰 만료/무효 → 자동 로그아웃
+      saveAuth(null);
+      setAuth(null);
+    }
+    return res;
+  }
 
   async function load() {
     try {
-      const res = await fetch('/api/books');
+      const res = await authedFetch('/api/books');
       const json = await res.json();
+      if (!res.ok) { setBooks([]); return; }
       setBooks(json.books ?? []);
-    } catch (e) { console.error(e); }
+    } catch { /* network */ }
   }
 
   function showToast(msg: string) {
@@ -51,14 +105,14 @@ export default function HomePage() {
       g.gain.linearRampToValueAtTime(0.15, ctx.currentTime + 0.01);
       g.gain.linearRampToValueAtTime(0, ctx.currentTime + 0.1);
       o.start(); o.stop(ctx.currentTime + 0.12);
-    } catch {}
+    } catch { /* ignore */ }
   }
 
   const handleDetect = useCallback(async (isbn: string) => {
     if (inflightRef.current.has(isbn)) return;
     inflightRef.current.add(isbn);
     try {
-      const res = await fetch('/api/books', {
+      const res = await authedFetch('/api/books', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ isbn }),
@@ -76,17 +130,18 @@ export default function HomePage() {
       });
       showToast(`✔ ${book.isbn}${book.scan_count > 1 ? ` ×${book.scan_count}` : ''}`);
       feedback(true);
-    } catch (e) {
+    } catch {
       showToast('네트워크 오류');
       feedback(false);
     } finally {
       inflightRef.current.delete(isbn);
     }
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [auth?.token]);
 
   async function remove(id: number) {
     if (!confirm('삭제할까요? (스캔 이력도 함께 삭제됩니다)')) return;
-    const res = await fetch(`/api/books/${id}`, { method: 'DELETE' });
+    const res = await authedFetch(`/api/books/${id}`, { method: 'DELETE' });
     if (res.ok) setBooks((prev) => prev.filter((b) => b.id !== id));
   }
 
@@ -112,13 +167,43 @@ export default function HomePage() {
     URL.revokeObjectURL(url);
   }
 
+  function logout() {
+    setActive(false);
+    saveAuth(null);
+    setAuth(null);
+  }
+
+  function onAuthed(token: string, refresh: string, user: { id: string; email: string }) {
+    const a: Auth = { token, refresh, user };
+    saveAuth(a);
+    setAuth(a);
+  }
+
   const totalScans = books.reduce((acc, b) => acc + b.scan_count, 0);
+
+  if (!authReady) {
+    return <main className="page"><div className="loading">…</div></main>;
+  }
+
+  if (!auth) {
+    return (
+      <main className="page auth-page">
+        <header className="header">
+          <h1>📚 Book Barcode <small>Quagga2 · Supabase</small></h1>
+        </header>
+        <AuthForm onAuthed={onAuthed} />
+      </main>
+    );
+  }
 
   return (
     <main className="page">
       <header className="header">
-        <h1>📚 Book Barcode <small>Quagga2 · Supabase</small></h1>
-        <span className="badge">{books.length}</span>
+        <h1>📚 Book Barcode <small>{auth.user.email}</small></h1>
+        <div className="header-right">
+          <span className="badge">{books.length}</span>
+          <button className="logout" onClick={logout}>로그아웃</button>
+        </div>
       </header>
 
       <Scanner active={active} onDetect={handleDetect} />

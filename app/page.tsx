@@ -238,12 +238,29 @@ export default function HomePage() {
       const blob = new Blob([buf], {
         type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       });
+      const filename = `도서목록_${stampNow()}.xlsx`;
+      const file = new File([blob], filename, { type: blob.type });
+
+      // iOS Safari 같은 모바일 환경에서는 a[download] 만으로 다운로드가
+      // 막히는 경우가 있어, Web Share API 가 가능하면 OS 공유/저장 시트로 우회.
+      const nav: any = typeof navigator !== 'undefined' ? navigator : null;
+      if (nav?.canShare && nav.canShare({ files: [file] })) {
+        try {
+          await nav.share({ files: [file], title: filename });
+          return;
+        } catch (e: any) {
+          if (e?.name === 'AbortError') return;
+          // 그 외 share 실패 → 아래 a.download 폴백으로
+        }
+      }
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `도서목록_${stampNow()}.xlsx`;
-      document.body.appendChild(a); a.click(); a.remove();
-      URL.revokeObjectURL(url);
+      a.download = filename;
+      a.rel = 'noopener';
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => { a.remove(); URL.revokeObjectURL(url); }, 0);
     } catch (e: any) {
       showToast(`내보내기 실패: ${e?.message ?? e}`);
     } finally {

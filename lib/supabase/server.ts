@@ -31,37 +31,38 @@ export function getAnonClient(): SupabaseClient {
 }
 
 /**
- * cookie 또는 Authorization 헤더에서 사용자 access_token 을 추출하고,
- * 그 토큰을 PostgREST 호출에 강제로 실어 RLS(auth.uid()) 가 적용되는 클라이언트.
+ * 호출자의 cookie 에 들어 있는 access_token / refresh_token 을 supabase-js
+ * 클라이언트의 내부 세션에 주입한다.
  *
- * 주의: supabase-js v2 의 `global.headers.Authorization` 만으로는 라이브러리
- * 내부에서 anon key 로 덮어쓰는 경우가 있어 from().select() 호출 때
- * RLS 가 익명으로 평가되는 버그가 발생함. 이를 막기 위해 `global.fetch` 자체를
- * 래핑해 매 요청에 apikey + Authorization 을 강제한다.
+ * persistSession: false 인 상태에서는 라이브러리에 세션이 비어 있어
+ * from()/rpc() 호출 시 anon key 가 Authorization 으로 들어가고 RLS 가
+ * 익명으로 평가된다. setSession 으로 사용자 JWT 를 세션에 등록해 놓으면
+ * 라이브러리가 표준대로 그 토큰을 싣고 PostgREST 를 호출한다.
+ *
+ * autoRefreshToken: false 라 setSession 안에서 자동 갱신은 일어나지 않는다.
  */
-export function getRequestClient(req: NextRequest): SupabaseClient {
+export async function getRequestClient(req: NextRequest): Promise<SupabaseClient> {
   checkEnv();
-  const cookieToken = req.cookies.get(ACCESS_COOKIE)?.value;
-  const headerToken = (req.headers.get('authorization') ?? '').replace(/^Bearer\s+/i, '');
-  const userToken   = cookieToken || headerToken || '';
+  const access  = req.cookies.get(ACCESS_COOKIE)?.value  ?? '';
+  const refresh = req.cookies.get(REFRESH_COOKIE)?.value ?? '';
 
-  return createClient(url, anonKey, {
+  const client = createClient(url, anonKey, {
     auth: { persistSession: false, autoRefreshToken: false },
-    global: {
-      fetch: (input, init = {}) => {
-        const headers = new Headers(init.headers ?? {});
-        headers.set('apikey', anonKey);
-        if (userToken) headers.set('Authorization', `Bearer ${userToken}`);
-        return fetch(input as any, { ...init, headers });
-      },
-    },
   });
+
+  if (access) {
+    await client.auth.setSession({
+      access_token : access,
+      refresh_token: refresh,
+    });
+  }
+  return client;
 }
 
 export async function requireUser(
   req: NextRequest,
 ): Promise<{ supabase: SupabaseClient; user: User } | null> {
-  const supabase = getRequestClient(req);
+  const supabase = await getRequestClient(req);
   const { data, error } = await supabase.auth.getUser();
   if (error || !data?.user) return null;
   return { supabase, user: data.user };

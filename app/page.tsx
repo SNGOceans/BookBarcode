@@ -14,62 +14,38 @@ type Book = {
   last_scanned_at: string;
 };
 
-type Auth = {
-  token: string;
-  refresh: string;
-  user: { id: string; email: string };
-};
-
-const STORE_KEY = 'bb:auth:v1';
-
-function loadAuth(): Auth | null {
-  if (typeof window === 'undefined') return null;
-  try {
-    const raw = localStorage.getItem(STORE_KEY);
-    if (!raw) return null;
-    return JSON.parse(raw);
-  } catch { return null; }
-}
-function saveAuth(a: Auth | null) {
-  if (typeof window === 'undefined') return;
-  if (a) localStorage.setItem(STORE_KEY, JSON.stringify(a));
-  else   localStorage.removeItem(STORE_KEY);
-}
+type Me = { id: string; email: string };
 
 export default function HomePage() {
-  const [auth, setAuth]           = useState<Auth | null>(null);
+  const [me, setMe]               = useState<Me | null>(null);
   const [authReady, setAuthReady] = useState(false);
   const [books, setBooks]         = useState<Book[]>([]);
   const [active, setActive]       = useState(false);
   const [toast, setToast]         = useState<string | null>(null);
   const inflightRef               = useRef<Set<string>>(new Set());
 
-  // 페이지 진입 시 localStorage 에서 세션 복원
+  // 페이지 진입 시 서버에 세션 확인
   useEffect(() => {
-    setAuth(loadAuth());
-    setAuthReady(true);
+    fetch('/api/auth/me')
+      .then((r) => r.json())
+      .then((j) => setMe(j.user ?? null))
+      .catch(() => setMe(null))
+      .finally(() => setAuthReady(true));
   }, []);
 
-  // 인증 상태가 바뀌면 books 다시 로드
+  // 인증 상태가 바뀌면 books 로드
   useEffect(() => {
-    if (!auth) { setBooks([]); return; }
+    if (!me) { setBooks([]); return; }
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [auth?.user.id]);
+  }, [me?.id]);
 
   async function authedFetch(input: string, init?: RequestInit) {
-    const token = auth?.token;
-    const res = await fetch(input, {
-      ...init,
-      headers: {
-        ...(init?.headers ?? {}),
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-    });
+    // 같은 origin 이라 cookie 가 자동 첨부됨
+    const res = await fetch(input, init);
     if (res.status === 401) {
-      // 토큰 만료/무효 → 자동 로그아웃
-      saveAuth(null);
-      setAuth(null);
+      // 세션 만료 → 자동 로그아웃 처리
+      setMe(null);
     }
     return res;
   }
@@ -136,8 +112,7 @@ export default function HomePage() {
     } finally {
       inflightRef.current.delete(isbn);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [auth?.token]);
+  }, []);
 
   async function remove(id: number) {
     if (!confirm('삭제할까요? (스캔 이력도 함께 삭제됩니다)')) return;
@@ -167,16 +142,14 @@ export default function HomePage() {
     URL.revokeObjectURL(url);
   }
 
-  function logout() {
+  async function logout() {
     setActive(false);
-    saveAuth(null);
-    setAuth(null);
+    try { await fetch('/api/auth/logout', { method: 'POST' }); } catch {}
+    setMe(null);
   }
 
-  function onAuthed(token: string, refresh: string, user: { id: string; email: string }) {
-    const a: Auth = { token, refresh, user };
-    saveAuth(a);
-    setAuth(a);
+  function onAuthed(user: Me) {
+    setMe(user);
   }
 
   const totalScans = books.reduce((acc, b) => acc + b.scan_count, 0);
@@ -185,7 +158,7 @@ export default function HomePage() {
     return <main className="page"><div className="loading">…</div></main>;
   }
 
-  if (!auth) {
+  if (!me) {
     return (
       <main className="page auth-page">
         <header className="header">
@@ -199,10 +172,10 @@ export default function HomePage() {
   return (
     <main className="page">
       <header className="header">
-        <h1>📚 Book Barcode <small>{auth.user.email}</small></h1>
+        <h1>📚 Book Barcode <small>{me.email}</small></h1>
         <div className="header-right">
           <span className="badge">{books.length}</span>
-          <button className="logout" onClick={logout}>로그아웃</button>
+          <button className="logout" onClick={() => void logout()}>로그아웃</button>
         </div>
       </header>
 

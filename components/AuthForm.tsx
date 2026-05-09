@@ -3,7 +3,7 @@
 import { useState } from 'react';
 
 type Props = {
-  onAuthed: (token: string, refresh: string, user: { id: string; email: string }) => void;
+  onAuthed: (user: { id: string; email: string }) => void;
 };
 
 export default function AuthForm({ onAuthed }: Props) {
@@ -28,10 +28,13 @@ export default function AuthForm({ onAuthed }: Props) {
         setErr(json.error ?? `오류 ${res.status}`);
         return;
       }
-      if (json.access_token) {
-        onAuthed(json.access_token, json.refresh_token, json.user);
-      } else if (json.needs_confirmation) {
+      if (json.needs_confirmation) {
         setInfo('가입 완료. 이메일 확인 링크를 클릭한 뒤 다시 로그인해 주세요.');
+        return;
+      }
+      if (json.user) {
+        // 토큰은 서버가 httpOnly cookie 로 심었으므로 클라이언트에서 다룰 게 없음
+        onAuthed(json.user);
       } else {
         setErr('알 수 없는 응답');
       }

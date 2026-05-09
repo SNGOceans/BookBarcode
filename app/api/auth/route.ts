@@ -1,15 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAnonClient } from '@/lib/supabase/server';
+import {
+  getAnonClient,
+  ACCESS_COOKIE,
+  REFRESH_COOKIE,
+  COOKIE_OPTS,
+} from '@/lib/supabase/server';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 /**
  * 로그인 / 회원가입 통합 엔드포인트.
- * 클라이언트에서는 Supabase JS 를 직접 쓰지 않고 이 API 만 호출한다.
+ * 성공 시 access_token / refresh_token 을 httpOnly cookie 로 응답에 심는다.
  *   body: { mode: 'signin' | 'signup', email, password }
- *   resp: { access_token, refresh_token, user: { id, email } }
- *         또는 (signup 인데 이메일 확인 필요): { needs_confirmation: true }
+ *   resp: { user: { id, email } }
+ *   가입했지만 이메일 확인 필요: { needs_confirmation: true }
  */
 export async function POST(req: NextRequest) {
   let body: any;
@@ -29,11 +34,12 @@ export async function POST(req: NextRequest) {
   if (mode === 'signin') {
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) return NextResponse.json({ error: error.message }, { status: 401 });
-    return NextResponse.json({
-      access_token : data.session?.access_token,
-      refresh_token: data.session?.refresh_token,
-      user         : { id: data.user?.id, email: data.user?.email },
-    });
+    return setSessionCookies(
+      NextResponse.json({ user: { id: data.user?.id, email: data.user?.email } }),
+      data.session?.access_token,
+      data.session?.refresh_token,
+      data.session?.expires_in,
+    );
   }
 
   // signup
@@ -47,9 +53,31 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  return NextResponse.json({
-    access_token : data.session.access_token,
-    refresh_token: data.session.refresh_token,
-    user         : { id: data.user?.id, email: data.user?.email },
-  });
+  return setSessionCookies(
+    NextResponse.json({ user: { id: data.user?.id, email: data.user?.email } }),
+    data.session.access_token,
+    data.session.refresh_token,
+    data.session.expires_in,
+  );
+}
+
+function setSessionCookies(
+  res: NextResponse,
+  accessToken?: string,
+  refreshToken?: string,
+  accessExpiresIn?: number,
+) {
+  if (accessToken) {
+    res.cookies.set(ACCESS_COOKIE, accessToken, {
+      ...COOKIE_OPTS,
+      maxAge: accessExpiresIn ?? 3600,
+    });
+  }
+  if (refreshToken) {
+    res.cookies.set(REFRESH_COOKIE, refreshToken, {
+      ...COOKIE_OPTS,
+      maxAge: 60 * 60 * 24 * 30,
+    });
+  }
+  return res;
 }

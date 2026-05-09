@@ -10,8 +10,8 @@ export async function GET() {
     const supabase = getSupabase();
     const { data, error } = await supabase
       .from('books')
-      .select('id, isbn, scanned_at')
-      .order('scanned_at', { ascending: false })
+      .select('id, isbn, scan_count, first_scanned_at, last_scanned_at')
+      .order('last_scanned_at', { ascending: false })
       .limit(1000);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     return NextResponse.json({ books: data ?? [] });
@@ -32,16 +32,11 @@ export async function POST(req: NextRequest) {
 
   try {
     const supabase = getSupabase();
-    const { data, error } = await supabase
-      .from('books')
-      .upsert(
-        { isbn, scanned_at: new Date().toISOString() },
-        { onConflict: 'isbn' },
-      )
-      .select('id, isbn, scanned_at')
-      .single();
+    // record_scan: scans insert + books upsert(scan_count++) 를 한 트랜잭션에 처리
+    const { data, error } = await supabase.rpc('record_scan', { p_isbn: isbn });
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    return NextResponse.json({ book: data });
+    const book = Array.isArray(data) ? data[0] : data;
+    return NextResponse.json({ book });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message ?? String(e) }, { status: 500 });
   }

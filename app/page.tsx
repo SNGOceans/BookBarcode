@@ -5,7 +5,13 @@ import dynamic from 'next/dynamic';
 
 const Scanner = dynamic(() => import('@/components/Scanner'), { ssr: false });
 
-type Book = { id: number; isbn: string; scanned_at: string };
+type Book = {
+  id: number;
+  isbn: string;
+  scan_count: number;
+  first_scanned_at: string;
+  last_scanned_at: string;
+};
 
 export default function HomePage() {
   const [books, setBooks] = useState<Book[]>([]);
@@ -65,11 +71,10 @@ export default function HomePage() {
       }
       const book: Book = json.book;
       setBooks((prev) => {
-        const existed = prev.some((b) => b.id === book.id);
         const next = prev.filter((b) => b.id !== book.id);
-        return [book, ...next].slice(0, 1000) ;
+        return [book, ...next].slice(0, 1000);
       });
-      showToast(`✔ ${book.isbn}`);
+      showToast(`✔ ${book.isbn}${book.scan_count > 1 ? ` ×${book.scan_count}` : ''}`);
       feedback(true);
     } catch (e) {
       showToast('네트워크 오류');
@@ -80,15 +85,23 @@ export default function HomePage() {
   }, []);
 
   async function remove(id: number) {
-    if (!confirm('삭제할까요?')) return;
+    if (!confirm('삭제할까요? (스캔 이력도 함께 삭제됩니다)')) return;
     const res = await fetch(`/api/books/${id}`, { method: 'DELETE' });
     if (res.ok) setBooks((prev) => prev.filter((b) => b.id !== id));
   }
 
   function exportCsv() {
     if (!books.length) return;
-    const rows = [['no', 'isbn', 'scanned_at']];
-    [...books].reverse().forEach((b, i) => rows.push([String(i + 1), b.isbn, b.scanned_at]));
+    const rows = [['no', 'isbn', 'scan_count', 'first_scanned_at', 'last_scanned_at']];
+    [...books].reverse().forEach((b, i) =>
+      rows.push([
+        String(i + 1),
+        b.isbn,
+        String(b.scan_count),
+        b.first_scanned_at,
+        b.last_scanned_at,
+      ]),
+    );
     const csv = '﻿' + rows.map((r) => r.join(',')).join('\r\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
@@ -98,6 +111,8 @@ export default function HomePage() {
     document.body.appendChild(a); a.click(); a.remove();
     URL.revokeObjectURL(url);
   }
+
+  const totalScans = books.reduce((acc, b) => acc + b.scan_count, 0);
 
   return (
     <main className="page">
@@ -124,15 +139,21 @@ export default function HomePage() {
 
       <section className="list">
         <div className="list-header">
-          <span>스캔된 바코드 <strong>{books.length}</strong></span>
+          <span>스캔된 도서 <strong>{books.length}</strong></span>
+          <span>총 스캔 <strong>{totalScans}</strong>회</span>
         </div>
         {!books.length && <div className="empty">아직 스캔된 바코드가 없습니다.</div>}
         <ul>
           {books.map((b) => (
             <li key={b.id}>
               <div className="info">
-                <span className="isbn">{b.isbn}</span>
-                <span className="time">{new Date(b.scanned_at).toLocaleString('ko-KR')}</span>
+                <span className="isbn">
+                  {b.isbn}
+                  {b.scan_count > 1 && <span className="count">×{b.scan_count}</span>}
+                </span>
+                <span className="time">
+                  {new Date(b.last_scanned_at).toLocaleString('ko-KR')}
+                </span>
               </div>
               <button className="del" onClick={() => void remove(b.id)} aria-label="삭제">✕</button>
             </li>

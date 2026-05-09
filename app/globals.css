@@ -98,6 +98,18 @@ button.primary.stop { background: #dc2626; }
 
 .empty { padding: 40px 20px; text-align: center; color: #475569; font-size: 14px; }
 
+.list .count {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  background: #1e293b;
+  color: #38bdf8;
+  font-weight: 600;
+  vertical-align: middle;
+}
+
 .toast {
   position: fixed; left: 50%; transform: translateX(-50%); bottom: 24px;
   background: #0f172a; border: 1px solid #334155;

@@ -30,12 +30,14 @@ export default function Scanner({ onDetect, active }: Props) {
         if (!code) continue;
         if (format !== 'ean_13') continue;
         const last = recentRef.current.get(code) ?? 0;
-        if (now - last < 2500) continue;
+        // 같은 코드의 연속 프레임 노이즈만 묶기 위한 짧은 디바운스.
+        // 같은 책을 다시 갖다 대면 재인식되어 scan_count 가 누적됨.
+        if (now - last < 500) continue;
         recentRef.current.set(code, now);
         onDetectRef.current(code);
       }
       for (const [k, v] of recentRef.current) {
-        if (now - v > 8000) recentRef.current.delete(k);
+        if (now - v > 3000) recentRef.current.delete(k);
       }
     };
 

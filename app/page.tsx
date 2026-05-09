@@ -191,10 +191,24 @@ export default function HomePage() {
           first_scanned_at: b.first_scanned_at ? new Date(b.first_scanned_at) : null,
           last_scanned_at:  b.last_scanned_at  ? new Date(b.last_scanned_at)  : null,
         });
-        row.height    = 25;
-        row.font      = { name: '맑은 고딕', size: 10 };
-        row.alignment = { vertical: 'center', wrapText: true };
-        row.getCell('no').alignment = { horizontal: 'center', vertical: 'center' };
+        row.height = 25;
+        row.font   = { name: '맑은 고딕', size: 10 };
+        // 긴 텍스트(도서명/저자/평역자/출판사)는 좌측 + wrap
+        row.alignment = { horizontal: 'left', vertical: 'center', wrapText: true, indent: 1 };
+
+        // 짧은 식별자·숫자·시각 컬럼은 가운데 정렬
+        const centerKeys = [
+          'no', 'isbn',
+          'price_standard', 'price_sales',
+          'used_price', 'used_min_price', 'used_count',
+          'scan_count',
+          'first_scanned_at', 'last_scanned_at',
+        ];
+        for (const k of centerKeys) {
+          row.getCell(k).alignment = { horizontal: 'center', vertical: 'center' };
+        }
+        // ISBN 은 등폭 글꼴이 보기 좋음
+        row.getCell('isbn').font = { name: 'Consolas', size: 10 };
 
         // 가격 천단위 콤마
         for (const k of ['price_standard', 'price_sales', 'used_price', 'used_min_price', 'used_count', 'scan_count']) {
@@ -231,6 +245,21 @@ export default function HomePage() {
           };
         }
       }
+      // 헤더 행은 강한 아래 테두리로 데이터와 구분
+      header.eachCell((c) => {
+        c.border = {
+          ...(c.border ?? {}),
+          bottom: { style: 'medium', color: { argb: 'FF6D28D9' } },
+        };
+      });
+      // 마지막 행 강한 아래 테두리 (표 끝 마감)
+      const last = ws.getRow(lastRow);
+      last.eachCell((c) => {
+        c.border = {
+          ...(c.border ?? {}),
+          bottom: { style: 'medium', color: { argb: 'FF7C3AED' } },
+        };
+      });
       ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: lastRow, column: lastCol } };
 
       // 다운로드

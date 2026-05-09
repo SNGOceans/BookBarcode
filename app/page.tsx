@@ -41,7 +41,6 @@ export default function HomePage() {
   const [books, setBooks]         = useState<Book[]>([]);
   const [active, setActive]       = useState(false);
   const [toast, setToast]         = useState<string | null>(null);
-  const [exporting, setExporting] = useState(false);
   const inflightRef               = useRef<Set<string>>(new Set());
 
   useEffect(() => {
@@ -135,154 +134,16 @@ export default function HomePage() {
     if (res.ok) setBooks((prev) => prev.filter((b) => b.id !== id));
   }
 
-  async function exportXlsx() {
-    if (!books.length || exporting) return;
-    setExporting(true);
-    try {
-      // dynamic import 로 메인 번들에서 떼어내기
-      const ExcelJS = (await import('exceljs')).default;
-
-      const wb = new ExcelJS.Workbook();
-      const ws = wb.addWorksheet('도서 목록', {
-        views: [{ state: 'frozen', ySplit: 1 }],
-      });
-
-      // reference xlsx 컬럼 순서를 따르되, 권수/부권수는 빼고 ISBN 을 No 다음으로
-      ws.columns = [
-        { header: '번호',         key: 'no',               width:  6 },
-        { header: 'ISBN',         key: 'isbn',             width: 18 },
-        { header: '도서 제목',     key: 'title',            width: 40 },
-        { header: '저자',          key: 'author',           width: 20 },
-        { header: '평역자/옮김',   key: 'translator',       width: 20 },
-        { header: '출판사',        key: 'publisher',        width: 18 },
-        { header: '정가',          key: 'price_standard',   width: 12 },
-        { header: '판매가',        key: 'price_sales',      width: 12 },
-        { header: '중고가',        key: 'used_price',       width: 12 },
-        { header: '중고최저가',    key: 'used_min_price',   width: 12 },
-        { header: '중고수량',      key: 'used_count',       width: 10 },
-        { header: '스캔횟수',      key: 'scan_count',       width: 10 },
-        { header: '최초스캔',      key: 'first_scanned_at', width: 22 },
-        { header: '최근스캔',      key: 'last_scanned_at',  width: 22 },
-      ];
-
-      // 헤더 스타일 (reference 모방: 보라 배경, 흰 글자, 굵게, 가운데)
-      const header = ws.getRow(1);
-      header.height = 30;
-      header.font   = { name: '맑은 고딕', size: 11, bold: true, color: { argb: 'FFFFFFFF' } };
-      header.fill   = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF7C3AED' } };
-      header.alignment = { horizontal: 'center', vertical: 'middle' };
-
-      // 데이터 (오래된 것부터 위)
-      const ordered = books.slice().reverse();
-      ordered.forEach((b, i) => {
-        const row = ws.addRow({
-          no:               i + 1,
-          isbn:             b.isbn,
-          title:            b.title          ?? '',
-          author:           b.author         ?? '',
-          translator:       b.translator     ?? '',
-          publisher:        b.publisher      ?? '',
-          price_standard:   b.price_standard,
-          price_sales:      b.price_sales,
-          used_price:       b.used_price,
-          used_min_price:   b.used_min_price,
-          used_count:       b.used_count,
-          scan_count:       b.scan_count,
-          first_scanned_at: b.first_scanned_at ? new Date(b.first_scanned_at) : null,
-          last_scanned_at:  b.last_scanned_at  ? new Date(b.last_scanned_at)  : null,
-        });
-        row.height = 25;
-        row.font   = { name: '맑은 고딕', size: 10 };
-        // 모든 셀 좌측 정렬로 통일
-        row.alignment = { horizontal: 'left', vertical: 'middle', wrapText: true, indent: 1 };
-        // ISBN 은 등폭 글꼴이 보기 좋음
-        row.getCell('isbn').font = { name: 'Consolas', size: 10 };
-
-        // 가격 천단위 콤마
-        for (const k of ['price_standard', 'price_sales', 'used_price', 'used_min_price', 'used_count', 'scan_count']) {
-          const cell = row.getCell(k);
-          if (typeof cell.value === 'number') cell.numFmt = '#,##0';
-        }
-        // 시각 포맷
-        for (const k of ['first_scanned_at', 'last_scanned_at']) {
-          const cell = row.getCell(k);
-          if (cell.value instanceof Date) cell.numFmt = 'yyyy-mm-dd hh:mm:ss';
-        }
-
-        // 가격 누락이면 핑크, 그 외 짝수 행은 옅은 보라
-        const hasPrice = b.price_standard != null || b.price_sales != null;
-        const fillArgb = !hasPrice ? 'FFFFB6C1' : ((i + 1) % 2 === 0 ? 'FFF3F0FF' : null);
-        if (fillArgb) {
-          row.eachCell((cell) => {
-            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: fillArgb } };
-          });
-        }
-      });
-
-      // 모든 셀 thin border
-      const lastCol = ws.columnCount;
-      const lastRow = ws.rowCount;
-      for (let r = 1; r <= lastRow; r++) {
-        const row = ws.getRow(r);
-        for (let c = 1; c <= lastCol; c++) {
-          row.getCell(c).border = {
-            top:    { style: 'thin', color: { argb: 'FFD0D0D0' } },
-            left:   { style: 'thin', color: { argb: 'FFD0D0D0' } },
-            bottom: { style: 'thin', color: { argb: 'FFD0D0D0' } },
-            right:  { style: 'thin', color: { argb: 'FFD0D0D0' } },
-          };
-        }
-      }
-      // 헤더 행은 강한 아래 테두리로 데이터와 구분
-      header.eachCell((c) => {
-        c.border = {
-          ...(c.border ?? {}),
-          bottom: { style: 'medium', color: { argb: 'FF6D28D9' } },
-        };
-      });
-      // 마지막 행 강한 아래 테두리 (표 끝 마감)
-      const last = ws.getRow(lastRow);
-      last.eachCell((c) => {
-        c.border = {
-          ...(c.border ?? {}),
-          bottom: { style: 'medium', color: { argb: 'FF7C3AED' } },
-        };
-      });
-      ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: lastRow, column: lastCol } };
-
-      // 다운로드
-      const buf = await wb.xlsx.writeBuffer();
-      const blob = new Blob([buf], {
-        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      });
-      const filename = `도서목록_${stampNow()}.xlsx`;
-      const file = new File([blob], filename, { type: blob.type });
-
-      // iOS Safari 같은 모바일 환경에서는 a[download] 만으로 다운로드가
-      // 막히는 경우가 있어, Web Share API 가 가능하면 OS 공유/저장 시트로 우회.
-      const nav: any = typeof navigator !== 'undefined' ? navigator : null;
-      if (nav?.canShare && nav.canShare({ files: [file] })) {
-        try {
-          await nav.share({ files: [file], title: filename });
-          return;
-        } catch (e: any) {
-          if (e?.name === 'AbortError') return;
-          // 그 외 share 실패 → 아래 a.download 폴백으로
-        }
-      }
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      a.rel = 'noopener';
-      document.body.appendChild(a);
-      a.click();
-      setTimeout(() => { a.remove(); URL.revokeObjectURL(url); }, 0);
-    } catch (e: any) {
-      showToast(`내보내기 실패: ${e?.message ?? e}`);
-    } finally {
-      setExporting(false);
-    }
+  function exportXlsx() {
+    if (!books.length) return;
+    // 서버가 Content-Disposition: attachment 로 응답하므로
+    // 단순 a.click() 만으로 모바일/데스크톱 모두 표준 다운로드 동작에 맡길 수 있다.
+    const a = document.createElement('a');
+    a.href = '/api/export/xlsx';
+    a.rel = 'noopener';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => a.remove(), 0);
   }
 
   async function logout() {
@@ -332,9 +193,7 @@ export default function HomePage() {
       </div>
 
       <div className="toolbar">
-        <button onClick={() => void exportXlsx()} disabled={exporting || !books.length}>
-          {exporting ? '내보내는 중…' : '⬇ XLSX'}
-        </button>
+        <button onClick={exportXlsx} disabled={!books.length}>⬇ XLSX</button>
         <button onClick={() => void load()}>↻ 새로고침</button>
       </div>
 

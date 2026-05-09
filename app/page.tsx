@@ -34,6 +34,7 @@ export default function HomePage() {
   const [books, setBooks]         = useState<Book[]>([]);
   const [active, setActive]       = useState(false);
   const [toast, setToast]         = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
   const inflightRef               = useRef<Set<string>>(new Set());
 
   useEffect(() => {
@@ -127,31 +128,57 @@ export default function HomePage() {
     if (res.ok) setBooks((prev) => prev.filter((b) => b.id !== id));
   }
 
-  function exportCsv() {
-    if (!books.length) return;
-    const head = ['no', 'isbn', 'title', 'author', 'publisher',
-      'price_standard', 'price_sales', 'used_price', 'used_min_price', 'used_count',
-      'scan_count', 'first_scanned_at', 'last_scanned_at'];
-    const rows: string[][] = [head];
-    [...books].reverse().forEach((b, i) =>
-      rows.push([
-        String(i + 1),
-        b.isbn,
-        csv(b.title), csv(b.author), csv(b.publisher),
-        nstr(b.price_standard), nstr(b.price_sales),
-        nstr(b.used_price),     nstr(b.used_min_price), nstr(b.used_count),
-        String(b.scan_count),
-        b.first_scanned_at, b.last_scanned_at,
-      ]),
-    );
-    const csvText = '﻿' + rows.map((r) => r.join(',')).join('\r\n');
-    const blob = new Blob([csvText], { type: 'text/csv;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-    a.href = url; a.download = `books-${stamp}.csv`;
-    document.body.appendChild(a); a.click(); a.remove();
-    URL.revokeObjectURL(url);
+  async function exportXlsx() {
+    if (!books.length || exporting) return;
+    setExporting(true);
+    try {
+      // dynamic import 로 메인 번들에서 떼어내기 (첫 클릭 시에만 로드)
+      const writeXlsxFile = (await import('write-excel-file')).default;
+
+      const rows = books.slice().reverse().map((b, i) => ({
+        no:               i + 1,
+        isbn:             b.isbn,
+        title:            b.title          ?? '',
+        author:           b.author         ?? '',
+        publisher:        b.publisher      ?? '',
+        price_standard:   b.price_standard ?? null,
+        price_sales:      b.price_sales    ?? null,
+        used_price:       b.used_price     ?? null,
+        used_min_price:   b.used_min_price ?? null,
+        used_count:       b.used_count     ?? null,
+        scan_count:       b.scan_count,
+        first_scanned_at: b.first_scanned_at ? new Date(b.first_scanned_at) : null,
+        last_scanned_at:  b.last_scanned_at  ? new Date(b.last_scanned_at)  : null,
+      }));
+
+      type Row = typeof rows[number];
+      const schema: any[] = [
+        { column: 'No',         type: Number, value: (r: Row) => r.no,             width:  5,  align: 'right' },
+        { column: 'ISBN',       type: String, value: (r: Row) => r.isbn,           width: 16 },
+        { column: '도서명',      type: String, value: (r: Row) => r.title,          width: 36 },
+        { column: '저자',        type: String, value: (r: Row) => r.author,         width: 22 },
+        { column: '출판사',      type: String, value: (r: Row) => r.publisher,      width: 14 },
+        { column: '정가',        type: Number, value: (r: Row) => r.price_standard, width: 10, format: '#,##0' },
+        { column: '판매가',      type: Number, value: (r: Row) => r.price_sales,    width: 10, format: '#,##0' },
+        { column: '중고가',      type: Number, value: (r: Row) => r.used_price,     width: 10, format: '#,##0' },
+        { column: '중고최저가',  type: Number, value: (r: Row) => r.used_min_price, width: 12, format: '#,##0' },
+        { column: '중고수량',    type: Number, value: (r: Row) => r.used_count,     width: 10, format: '#,##0' },
+        { column: '스캔횟수',    type: Number, value: (r: Row) => r.scan_count,     width: 10, format: '#,##0' },
+        { column: '최초스캔',    type: Date,   value: (r: Row) => r.first_scanned_at, width: 22, format: 'yyyy-mm-dd hh:mm:ss' },
+        { column: '최근스캔',    type: Date,   value: (r: Row) => r.last_scanned_at,  width: 22, format: 'yyyy-mm-dd hh:mm:ss' },
+      ];
+
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      await writeXlsxFile(rows, {
+        schema,
+        fileName: `books-${stamp}.xlsx`,
+        sheet: '도서 목록',
+      });
+    } catch (e: any) {
+      showToast(`내보내기 실패: ${e?.message ?? e}`);
+    } finally {
+      setExporting(false);
+    }
   }
 
   async function logout() {
@@ -172,7 +199,7 @@ export default function HomePage() {
     return (
       <main className="page auth-page">
         <header className="header">
-          <h1>📚 Book Barcode <small>Quagga2 · Supabase</small></h1>
+          <h1>📚 Book Barcode <small>zbar-wasm · Supabase · Aladin</small></h1>
         </header>
         <AuthForm onAuthed={onAuthed} />
       </main>
@@ -201,7 +228,9 @@ export default function HomePage() {
       </div>
 
       <div className="toolbar">
-        <button onClick={exportCsv}>⬇ CSV</button>
+        <button onClick={() => void exportXlsx()} disabled={exporting || !books.length}>
+          {exporting ? '내보내는 중…' : '⬇ XLSX'}
+        </button>
         <button onClick={() => void load()}>↻ 새로고침</button>
       </div>
 
@@ -267,11 +296,3 @@ function Price({ label, value, used }: { label: string; value: string; used?: bo
     </span>
   );
 }
-
-function csv(s: string | null): string {
-  const v = s ?? '';
-  if (v.includes(',') || v.includes('"') || v.includes('\n'))
-    return `"${v.replace(/"/g, '""')}"`;
-  return v;
-}
-function nstr(n: number | null): string { return n == null ? '' : String(n); }

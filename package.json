@@ -13,7 +13,8 @@
     "@undecaf/zbar-wasm": "^0.10.1",
     "next": "^16.0.0",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "write-excel-file": "^2.0.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

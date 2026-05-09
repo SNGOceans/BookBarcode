@@ -31,18 +31,30 @@ export function getAnonClient(): SupabaseClient {
 }
 
 /**
- * httpOnly cookie 의 access_token 을 PostgREST 에 그대로 전달해
- * RLS(auth.uid()) 가 자동 적용되는 클라이언트.
+ * cookie 또는 Authorization 헤더에서 사용자 access_token 을 추출하고,
+ * 그 토큰을 PostgREST 호출에 강제로 실어 RLS(auth.uid()) 가 적용되는 클라이언트.
+ *
+ * 주의: supabase-js v2 의 `global.headers.Authorization` 만으로는 라이브러리
+ * 내부에서 anon key 로 덮어쓰는 경우가 있어 from().select() 호출 때
+ * RLS 가 익명으로 평가되는 버그가 발생함. 이를 막기 위해 `global.fetch` 자체를
+ * 래핑해 매 요청에 apikey + Authorization 을 강제한다.
  */
 export function getRequestClient(req: NextRequest): SupabaseClient {
   checkEnv();
-  const access = req.cookies.get(ACCESS_COOKIE)?.value;
-  const header = access
-    ? `Bearer ${access}`
-    : (req.headers.get('authorization') ?? '');
+  const cookieToken = req.cookies.get(ACCESS_COOKIE)?.value;
+  const headerToken = (req.headers.get('authorization') ?? '').replace(/^Bearer\s+/i, '');
+  const userToken   = cookieToken || headerToken || '';
+
   return createClient(url, anonKey, {
     auth: { persistSession: false, autoRefreshToken: false },
-    global: header ? { headers: { Authorization: header } } : undefined,
+    global: {
+      fetch: (input, init = {}) => {
+        const headers = new Headers(init.headers ?? {});
+        headers.set('apikey', anonKey);
+        if (userToken) headers.set('Authorization', `Bearer ${userToken}`);
+        return fetch(input as any, { ...init, headers });
+      },
+    },
   });
 }
 

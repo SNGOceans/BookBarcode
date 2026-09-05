@@ -47,6 +47,10 @@ html, body {
 
 button, input, select { font: inherit; color: inherit; }
 button { cursor: pointer; }
+
+/* 이 앱의 링크는 전부 버튼·행·메뉴 모양이다. 본문 속 링크가 없어서 밑줄을 기본으로 끈다.
+   규칙마다 개별로 끄면 링크를 새로 넣을 때마다 빠뜨린다(실측: 9곳 중 4곳이 빠져 있었다). */
+a { text-decoration: none; color: inherit; }
 b, strong { font-weight: 600; }
 .dim { color: var(--text-mute); }
 
@@ -481,8 +485,10 @@ b, strong { font-weight: 600; }
 
 /* ---------------------------------------------------------- 무대 */
 
+/* 화면 높이를 다 쓴다.
+   flex 자식은 기본이 「내용만큼」이라, 이걸 빼면 버튼 아래가 통째로 빈다. */
 .stage {
-  min-width: 0; min-height: 0;
+  flex: 1; min-width: 0; min-height: 0;
   display: flex; flex-direction: column;
   background: var(--bg);
 }
@@ -583,6 +589,8 @@ b, strong { font-weight: 600; }
   width: 100%; min-height: 46px; padding: 8px 10px;
   background: transparent; border: 0;
   color: var(--text); text-align: left;
+  /* 링크로 바뀌었다. 밑줄이 남으면 글자마다 줄이 그어져 지저분하다. */
+  text-decoration: none;
 }
 .recent-row:active { background: var(--raised); }
 .recent-label {

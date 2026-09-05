@@ -147,7 +147,8 @@ async function createZxingEngine(): Promise<ScanEngine | null> {
           tryRotate: true,
           tryInvert: true,
           tryDownscale: true,
-          maxNumberOfSymbols: 2,
+          // 한 번에 하나만 기록하므로 엔진에도 하나만 요구한다(그만큼 빨라진다).
+          maxNumberOfSymbols: 1,
         });
         return results.map((r) => {
           const p = r.position;

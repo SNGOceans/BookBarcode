@@ -42,6 +42,8 @@ export default function Scanner({ onDetect, active }: Props) {
   const gateRef     = useRef(new PresenceGate(1500));
   const markersRef  = useRef<Marker[]>([]);
   const trackRef    = useRef<MediaStreamTrack | null>(null);
+  // 렌더 루프에서 setState 를 부르지 않기 위한 현재값 사본
+  const lockedRef   = useRef(false);
 
   const [error, setError]     = useState<string | null>(null);
   const [running, setRunning] = useState(false);
@@ -94,6 +96,7 @@ export default function Scanner({ onDetect, active }: Props) {
 
     let scanInFlight = false;
     let lastScanAt   = 0;
+    let lastStatAt   = 0;
     let scanCost     = 40;   // 직전 스캔 소요(ms) — 스로틀을 여기에 맞춘다
 
     // 엔진은 필요해질 때 로드한다. 내장 엔진으로 되는 기기는 wasm 을 받지 않는다.
@@ -178,15 +181,40 @@ export default function Scanner({ onDetect, active }: Props) {
         if (!ctx) throw new Error('Canvas 2D context 를 사용할 수 없습니다.');
         const octx = overlay.getContext('2d');
 
+        // 오버레이 크기와 그라디언트는 캐시한다.
+        // 매 프레임 getBoundingClientRect 는 레이아웃을 강제하고
+        // createLinearGradient 는 매번 객체를 새로 만든다 — 둘 다 스캔 루프에 얹으면 안 된다.
+        let cw = 0;
+        let ch = 0;
+        let dpr = 1;
+        let lineGrad: CanvasGradient | null = null;
+        let lastSizeCheck = 0;
+
+        const syncOverlaySize = (now: number) => {
+          // 크기는 자주 바뀌지 않는다. 0.5초에 한 번만 확인한다.
+          if (now - lastSizeCheck < 500 && cw > 0) return;
+          lastSizeCheck = now;
+          const rect = overlay.getBoundingClientRect();
+          const d  = Math.min(2, window.devicePixelRatio || 1);
+          const w  = Math.max(1, Math.round(rect.width  * d));
+          const h  = Math.max(1, Math.round(rect.height * d));
+          if (w === cw && h === ch && d === dpr) return;
+          cw = w; ch = h; dpr = d;
+          overlay.width  = cw;
+          overlay.height = ch;
+          if (octx) {
+            lineGrad = octx.createLinearGradient(0, 0, cw, 0);
+            lineGrad.addColorStop(0,   'rgba(248, 113, 113, 0)');
+            lineGrad.addColorStop(0.5, 'rgba(248, 113, 113, 0.8)');
+            lineGrad.addColorStop(1,   'rgba(248, 113, 113, 0)');
+          }
+        };
+
         /** 인식 마커를 영상 위에 겹쳐 그린다. */
         const drawOverlay = (now: number) => {
           if (!octx) return;
-          const rect = overlay.getBoundingClientRect();
-          const dpr  = Math.min(2, window.devicePixelRatio || 1);
-          const cw   = Math.max(1, Math.round(rect.width  * dpr));
-          const ch   = Math.max(1, Math.round(rect.height * dpr));
-          if (overlay.width  !== cw) overlay.width  = cw;
-          if (overlay.height !== ch) overlay.height = ch;
+          syncOverlaySize(now);
+          if (!cw || !ch) return;
 
           octx.clearRect(0, 0, cw, ch);
 
@@ -194,7 +222,15 @@ export default function Scanner({ onDetect, active }: Props) {
           const vh = video.videoHeight;
           if (!vw || !vh) return;
           const kx = cw / vw;
-          const ky = ch / vh;
+
+          // 판독 기준선 — 화면 세로 중앙을 가로지르는 가는 붉은 선.
+          // 캔버스에 직접 그린다. 인식 점을 이 선 위에 얹어야 하는데
+          // 선이 CSS 애니메이션으로 따로 움직이면 둘이 어긋난다.
+          const lineY = Math.round(ch / 2);
+          if (lineGrad) {
+            octx.fillStyle = lineGrad;
+            octx.fillRect(0, lineY - dpr, cw, 2 * dpr);
+          }
 
           let anyLocked = false;
           const live = markersRef.current.filter((m) => now - m.at < MARKER_TTL);
@@ -207,37 +243,30 @@ export default function Scanner({ onDetect, active }: Props) {
 
             // 확정은 주황, 아직 읽는 중은 노랑.
             const color = m.locked ? '251, 146, 60' : '253, 224, 71';
-            const pts   = m.pts.map((p) => ({ x: p.x * kx, y: p.y * ky }));
-            if (!pts.length) continue;
 
-            if (pts.length >= 3) {
-              octx.beginPath();
-              octx.moveTo(pts[0].x, pts[0].y);
-              for (let i = 1; i < pts.length; i++) octx.lineTo(pts[i].x, pts[i].y);
-              octx.closePath();
-              octx.strokeStyle = `rgba(${color}, ${alpha * 0.9})`;
-              octx.lineWidth   = 3 * dpr;
-              octx.lineJoin    = 'round';
-              octx.stroke();
-              octx.fillStyle = `rgba(${color}, ${alpha * 0.12})`;
-              octx.fill();
-            }
+            // 인식 지점을 기준선 위로 내려 x 위치에만 점으로 찍는다.
+            // 같은 x 에 여러 점이 겹치면 한 번만 그린다(꼭짓점은 위아래가 같은 x 다).
+            const seen = new Set<number>();
+            for (const p of m.pts) {
+              const x = Math.round(p.x * kx);
+              if (x < 0 || x > cw) continue;
+              const key = Math.round(x / (3 * dpr));
+              if (seen.has(key)) continue;
+              seen.add(key);
 
-            // 꼭짓점 — 「지금 읽고 있다」를 눈으로 보여주는 점
-            for (const p of pts) {
               octx.beginPath();
-              octx.arc(p.x, p.y, 6 * dpr, 0, Math.PI * 2);
+              octx.arc(x, lineY, 4 * dpr, 0, Math.PI * 2);
               octx.fillStyle = `rgba(${color}, ${alpha})`;
               octx.fill();
-              octx.beginPath();
-              octx.arc(p.x, p.y, 10 * dpr, 0, Math.PI * 2);
-              octx.strokeStyle = `rgba(${color}, ${alpha * 0.45})`;
-              octx.lineWidth   = 2 * dpr;
-              octx.stroke();
             }
           }
 
-          setLocked((prev) => (prev === anyLocked ? prev : anyLocked));
+          // 값이 실제로 바뀔 때만 React 를 건드린다.
+          // 매 프레임 setState 를 부르면 스캔 루프와 렌더가 같은 스레드를 나눠 쓴다.
+          if (anyLocked !== lockedRef.current) {
+            lockedRef.current = anyLocked;
+            setLocked(anyLocked);
+          }
         };
 
         /** 슬롯의 엔진을 필요할 때 로드한다. 실패한 슬롯은 사다리에서 뺀다. */
@@ -273,28 +302,49 @@ export default function Scanner({ onDetect, active }: Props) {
           engineName: string,
           variantName: string,
         ): boolean => {
-          let hit = false;
           const markAt = performance.now();
+          const centerY = video.videoHeight / 2;
 
-          for (const d of dets) {
-            const pts  = d.points.map(toFrame);
-            const full = isValidEAN13(d.code);
-            // 부분 인식도 마커로는 보여준다 — 「인식 중」 피드백.
-            if (pts.length) markersRef.current.push({ pts, locked: full, at: markAt });
-            if (!full) continue;
+          // 화면 좌표로 옮기고, 기준선(세로 중앙)에서 얼마나 떨어졌는지를 함께 잰다.
+          const scored = dets.map((d) => {
+            const pts = d.points.map(toFrame);
+            const mid = pts.length
+              ? pts.reduce((a, p) => a + p.y, 0) / pts.length
+              : Number.POSITIVE_INFINITY;
+            return { pts, code: d.code, full: isValidEAN13(d.code), dist: Math.abs(mid - centerY) };
+          });
 
-            hit = true;
-            // 같은 책을 계속 비추고 있는 동안에는 한 번만 기록한다.
-            if (gateRef.current.see(d.code, now)) {
-              logInfo('scan.hit', d.code, { engine: engineName, variant: variantName });
-              onDetectRef.current(d.code);
-            } else {
-              logDebug('scan.dedup', d.code, { reason: '계속 보이는 중 — 중복 기록 억제' });
+          // ★ 한 번에 하나만 기록한다.
+          // 한 프레임에 여러 바코드가 잡혀도 사용자가 겨눈 것은 하나다.
+          // 기준선에 가장 가까운 것을 그 하나로 본다.
+          const valid = scored.filter((s) => s.full).sort((a, b) => a.dist - b.dist);
+          const picked = valid[0];
+
+          if (picked) {
+            markersRef.current.push({ pts: picked.pts, locked: true, at: markAt });
+            if (valid.length > 1) {
+              logDebug('scan.multi', `${valid.length}개가 잡혀 기준선에 가장 가까운 하나만 기록`, {
+                picked: picked.code,
+                ignored: valid.slice(1).map((s) => s.code),
+              });
             }
+            // 같은 책을 계속 비추고 있는 동안에는 한 번만 기록한다.
+            if (gateRef.current.see(picked.code, now)) {
+              logInfo('scan.hit', picked.code, { engine: engineName, variant: variantName });
+              onDetectRef.current(picked.code);
+            } else {
+              logDebug('scan.dedup', picked.code, { reason: '계속 보이는 중 — 중복 기록 억제' });
+            }
+          } else {
+            // 아직 못 읽은 부분 인식도 「찾는 중」으로 하나만 보여준다.
+            const partial = scored
+              .filter((s) => s.pts.length)
+              .sort((a, b) => a.dist - b.dist)[0];
+            if (partial) markersRef.current.push({ pts: partial.pts, locked: false, at: markAt });
           }
 
           gateRef.current.sweep(now);
-          return hit;
+          return !!picked;
         };
 
         /** 한 (엔진, 전략) 조합으로 한 번 스캔한다. */
@@ -335,7 +385,9 @@ export default function Scanner({ onDetect, active }: Props) {
           drawOverlay(now);
 
           // 직전 스캔 비용에 맞춰 간격을 조절한다. 빠른 경로일수록 더 자주 시도한다.
-          const interval = Math.min(200, Math.max(30, scanCost * 0.5));
+          // 비싼 전략 한 번 때문에 간격이 크게 벌어지면 「느려졌다」로 체감되므로
+          // 계수를 낮게 두고 상한도 조인다.
+          const interval = Math.min(150, Math.max(25, scanCost * 0.35));
 
           if (
             cycle
@@ -360,9 +412,11 @@ export default function Scanner({ onDetect, active }: Props) {
             } finally {
               scanCost = performance.now() - t0;
               scanInFlight = false;
-              if (!stopped) {
-                const ms = Math.round(scanCost);
-                setStat((p) => (p && p.engine === slot.name && Math.abs(p.ms - ms) < 4 ? p : { engine: slot.name, ms }));
+              // 표시용 수치는 0.5초에 한 번만 갱신한다.
+              // 스캔마다 setState 를 부르면 초당 수십 번 다시 렌더된다.
+              if (!stopped && now - lastStatAt > 500) {
+                lastStatAt = now;
+                setStat({ engine: slot.name, ms: Math.round(scanCost) });
               }
             }
           }
@@ -423,9 +477,9 @@ export default function Scanner({ onDetect, active }: Props) {
       <div className="scanner" style={{ aspectRatio: String(aspect) }}>
         <video  ref={videoRef}   className="scanner-video" muted playsInline />
         <canvas ref={workRef}    className="scanner-work" />
+        {/* 기준선과 인식 점은 오버레이 캔버스가 함께 그린다.
+            선을 CSS 로 따로 두면 점과 위치가 어긋난다. */}
         <canvas ref={overlayRef} className="scanner-overlay" />
-        <div className={'scan-frame' + (locked ? ' locked' : '')} />
-        {active && running && <div className={'scan-line' + (locked ? ' locked' : '')} />}
         {!running && !error && active && <div className="scanner-status">카메라 시작 중…</div>}
         {error && <div className="scanner-status error">⚠ {error}</div>}
         {!active && <div className="scanner-status">⏸ 정지됨. 시작 버튼을 눌러주세요.</div>}

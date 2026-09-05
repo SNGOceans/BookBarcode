@@ -46,14 +46,24 @@ export const SCAN_VARIANTS: ScanVariant[] = [
   // 2) 중앙 확대 — 멀리 있어 바코드가 작게 잡히는 경우. 업샘플링으로 모듈당 픽셀 수를 늘린다.
   { name: 'tele',        crop: { wRatio: 0.62, hRatio: 0.42 }, targetWidth: 1680, stretch: true,  sharpen: 0,   rotate: 0 },
   // 3) 전체 프레임 45° — 비스듬히 놓인 바코드. zbar 의 각도 사각지대를 덮는다.
-  { name: 'wide-45',     crop: { wRatio: 0.94, hRatio: 0.94 }, targetWidth: 1440, stretch: true,  sharpen: 0,   rotate: 45 },
+  { name: 'wide-45',     crop: { wRatio: 0.94, hRatio: 0.94 }, targetWidth: 1280, stretch: true,  sharpen: 0,   rotate: 45 },
   // 4) 중앙 확대 + 샤프닝 — 멀고 초점까지 나간 경우.
-  { name: 'tele-sharp',  crop: { wRatio: 0.62, hRatio: 0.42 }, targetWidth: 2000, stretch: true,  sharpen: 0.9, rotate: 0 },
+  { name: 'tele-sharp',  crop: { wRatio: 0.62, hRatio: 0.42 }, targetWidth: 1800, stretch: true,  sharpen: 0.9, rotate: 0 },
   // 5) 중앙 45° + 샤프닝 — 멀고 기울어진, 가장 어려운 조합.
-  { name: 'tele-45',     crop: { wRatio: 0.70, hRatio: 0.62 }, targetWidth: 1700, stretch: true,  sharpen: 0.7, rotate: 45 },
+  { name: 'tele-45',     crop: { wRatio: 0.70, hRatio: 0.62 }, targetWidth: 1300, stretch: true,  sharpen: 0.7, rotate: 45 },
   // 6) 중앙 넓게 + 샤프닝 — 위 전략들이 놓치는 살짝 벗어난 위치를 덮는다.
-  { name: 'mid-sharp',   crop: { wRatio: 0.86, hRatio: 0.62 }, targetWidth: 1800, stretch: true,  sharpen: 0.7, rotate: 0 },
+  { name: 'mid-sharp',   crop: { wRatio: 0.86, hRatio: 0.62 }, targetWidth: 1400, stretch: true,  sharpen: 0.7, rotate: 0 },
 ];
+// ⚠️ 목표폭은 인식률과 속도를 맞바꾸는 손잡이다. 감으로 돌리지 말 것.
+// 버퍼 넓이는 제곱으로 늘고 언샤프는 그 위를 세 번 훑는다.
+// 한 번 놓치기 시작하면 그 비용이 그대로 「인식이 느려졌다」로 나타난다.
+//
+// 2026-09-05 실측(npm run bench:scan · 32케이스) — 폭을 줄인 대가가 균일하지 않았다.
+//   wide-45 1440→1280 · tele-45 1700→1300 · mid-sharp 1800→1400 : 인식률 변화 없음(공짜)
+//   tele-sharp 2000→1500                                        : 27건 → 26건 (1건 손실)
+//   tele-sharp 1800                                             : 27건 회복
+// ⇒ 멀고 흐린 케이스를 살리는 것은 **tele-sharp 의 폭 하나**다. 여기만 지키고 나머지는 줄인다.
+// 값을 바꿨으면 반드시 bench 를 다시 돌려 어느 쪽을 잃었는지 확인한다.
 // −45° 판은 넣지 않는다. 스캔라인이 가로·세로 양쪽으로 도는 한
 // +45° 한 장이면 두 대각선이 모두 0° 또는 90° 로 옮겨와 덮이기 때문이다.
 
@@ -357,24 +367,48 @@ export class ScanCycle {
   private variantIdx = 0;
   private pinned = false;
   private missStreak = 0;
+  /**
+   * 탐색 중일 때 「가장 싼 조합」과 「다음 후보」를 번갈아 낸다.
+   *
+   * 왜 — 사다리를 끝까지 걸어 올라가면 뒤쪽 전략이 비싸서(큰 버퍼·샤프닝)
+   * 한 번 놓치기 시작한 순간부터 초당 시도 횟수가 급격히 떨어진다.
+   * 그 사이에 사용자가 바코드를 제대로 갖다 대도 **비싼 전략을 돌고 있느라 늦게 잡는다.**
+   * 그래서 매번 (0,0) 을 사이에 끼워 흔한 경우를 항상 빠르게 잡는다.
+   */
+  private probeTurn = true;
+  private lastIssued: { engine: number; variant: number } = { engine: 0, variant: 0 };
 
   constructor(variantCountPerEngine: number[], pinLimit = 6) {
     if (!variantCountPerEngine.length) throw new Error('엔진이 하나도 없다');
     this.counts = variantCountPerEngine.map((n) => Math.max(1, n));
     this.pinLimit = pinLimit;
+    // 후보는 (0,0) 다음 자리에서 시작한다.
+    // (0,0) 은 probeTurn 이 따로 내므로 여기 두면 같은 조합을 연속으로 두 번 돌게 된다.
+    this.advance();
   }
 
   current(): { engine: number; variant: number; pinned: boolean } {
-    return { engine: this.engineIdx, variant: this.variantIdx, pinned: this.pinned };
+    if (this.pinned) {
+      this.lastIssued = { engine: this.engineIdx, variant: this.variantIdx };
+    } else if (this.probeTurn) {
+      // 가장 싼 조합 — 첫 엔진의 첫 전략
+      this.lastIssued = { engine: 0, variant: 0 };
+    } else {
+      this.lastIssued = { engine: this.engineIdx, variant: this.variantIdx };
+    }
+    return { ...this.lastIssued, pinned: this.pinned };
   }
 
-  /** 이번 조합으로 읽어냈다 — 다음 프레임도 같은 조합으로 간다. */
+  /** 방금 낸 조합으로 읽어냈다 — 다음 프레임도 그 조합으로 간다. */
   hit(): void {
+    this.engineIdx = this.lastIssued.engine;
+    this.variantIdx = this.lastIssued.variant;
     this.pinned = true;
     this.missStreak = 0;
+    this.probeTurn = true;
   }
 
-  /** 이번 조합이 놓쳤다. */
+  /** 방금 낸 조합이 놓쳤다. */
   miss(): void {
     if (this.pinned) {
       this.missStreak++;
@@ -382,11 +416,18 @@ export class ScanCycle {
       if (this.missStreak > this.pinLimit) {
         this.pinned = false;
         this.missStreak = 0;
+        this.probeTurn = true;
         this.advance();
       }
       return;
     }
-    this.advance();
+    // 싼 조합을 낸 차례였으면 다음은 후보 차례, 후보를 냈으면 한 칸 전진한다.
+    if (this.probeTurn) {
+      this.probeTurn = false;
+    } else {
+      this.advance();
+      this.probeTurn = true;
+    }
   }
 
   private advance(): void {
@@ -395,6 +436,10 @@ export class ScanCycle {
       this.variantIdx = 0;
       this.engineIdx = (this.engineIdx + 1) % this.counts.length;
     }
+    // 싼 조합은 probeTurn 이 따로 내므로 후보로는 건너뛴다.
+    if (this.engineIdx === 0 && this.variantIdx === 0 && this.counts.length + this.counts[0] > 2) {
+      this.advance();
+    }
   }
 
   reset(): void {
@@ -402,5 +447,8 @@ export class ScanCycle {
     this.variantIdx = 0;
     this.pinned = false;
     this.missStreak = 0;
+    this.probeTurn = true;
+    this.lastIssued = { engine: 0, variant: 0 };
+    this.advance();
   }
 }

@@ -82,16 +82,49 @@ test('고정 경로가 연달아 놓치면 탐색으로 돌아간다', () => {
   assert.equal(cycle.current().pinned, false, '고정이 풀려야 한다');
 });
 
-test('전략을 다 쓰면 다음 엔진으로 넘어가고, 끝에서 처음으로 돈다', () => {
+test('탐색 중에는 가장 싼 조합을 한 번씩 사이에 끼운다', () => {
+  // 비싼 전략만 연달아 돌면 흔한 경우(가까이 반듯하게 댄 바코드)를 늦게 잡는다.
+  const cycle = new ScanCycle([2, 4], 0);
+  const seq = [];
+  for (let i = 0; i < 6; i++) { seq.push(pick(cycle)); cycle.miss(); }
+
+  // 홀수 번째마다 (0,0) 이 나와야 한다.
+  for (let i = 0; i < seq.length; i += 2) {
+    assert.deepEqual(seq[i], { engine: 0, variant: 0 }, `${i}번째가 싼 조합이 아니다`);
+  }
+  // 그 사이 자리는 (0,0) 이 아닌 다른 후보여야 한다.
+  for (let i = 1; i < seq.length; i += 2) {
+    assert.notDeepEqual(seq[i], { engine: 0, variant: 0 }, `${i}번째가 중복이다`);
+  }
+});
+
+test('후보는 전략을 다 쓰면 다음 엔진으로 넘어가고 끝에서 되돈다', () => {
   // 엔진 0 은 전략 1개, 엔진 1 은 전략 2개
   const cycle = new ScanCycle([1, 2], 0);
-  assert.deepEqual(pick(cycle), { engine: 0, variant: 0 });
-  cycle.miss();
-  assert.deepEqual(pick(cycle), { engine: 1, variant: 0 });
-  cycle.miss();
-  assert.deepEqual(pick(cycle), { engine: 1, variant: 1 });
-  cycle.miss();
-  assert.deepEqual(pick(cycle), { engine: 0, variant: 0 }, '한 바퀴 돌면 처음으로');
+  const candidates = [];
+  for (let i = 0; i < 6; i++) {
+    const c = pick(cycle);
+    cycle.miss();
+    if (!(c.engine === 0 && c.variant === 0)) candidates.push(c);
+  }
+  assert.deepEqual(candidates.slice(0, 3), [
+    { engine: 1, variant: 0 },
+    { engine: 1, variant: 1 },
+    { engine: 1, variant: 0 },
+  ], '후보가 (1,0) → (1,1) 을 돌아야 한다');
+});
+
+test('싼 조합으로 읽어내면 그 조합이 고정된다', () => {
+  const cycle = new ScanCycle([2, 4], 3);
+  cycle.miss();                       // 싼 차례를 흘려보내 후보 차례로
+  const candidate = pick(cycle);
+  assert.notDeepEqual(candidate, { engine: 0, variant: 0 });
+  cycle.miss();                       // 다시 싼 차례
+  const probe = pick(cycle);
+  assert.deepEqual(probe, { engine: 0, variant: 0 });
+  cycle.hit();
+  assert.deepEqual(pick(cycle), { engine: 0, variant: 0 }, '고정 대상은 방금 낸 조합이다');
+  assert.equal(cycle.current().pinned, true);
 });
 
 test('엔진이 하나도 없으면 만들 수 없다', () => {

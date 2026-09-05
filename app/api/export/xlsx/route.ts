@@ -8,7 +8,24 @@ export const dynamic = 'force-dynamic';
 const BOOK_COLS =
   'id, isbn, scan_count, first_scanned_at, last_scanned_at, ' +
   'title, author, translator, publisher, ' +
-  'price_standard, price_sales, used_price, used_min_price, used_count';
+  'price_standard, price_sales, used_price, used_min_price, used_count, meta_fetched_at';
+
+type BookRow = {
+  isbn: string;
+  scan_count: number;
+  first_scanned_at: string | null;
+  last_scanned_at: string | null;
+  title: string | null;
+  author: string | null;
+  translator: string | null;
+  publisher: string | null;
+  price_standard: number | null;
+  price_sales: number | null;
+  used_price: number | null;
+  used_min_price: number | null;
+  used_count: number | null;
+  meta_fetched_at: string | null;
+};
 
 function pad2(n: number) { return String(n).padStart(2, '0'); }
 function stampNow(): string {
@@ -17,33 +34,38 @@ function stampNow(): string {
        + `_${pad2(d.getHours())}${pad2(d.getMinutes())}${pad2(d.getSeconds())}`;
 }
 
+const INK   = 'FF1F2937';   // 본문 글자
+const MUTED = 'FF6B7280';   // 머리글 글자
+const RULE  = 'FFE5E7EB';   // 가로 구분선
+
+const NUMERIC = [
+  'price_standard', 'used_price', 'used_min_price',
+  'used_count', 'price_sales', 'scan_count',
+];
+const DATES = ['first_scanned_at', 'last_scanned_at'];
+
 /**
- * 서버에서 xlsx 를 만들고 Content-Disposition: attachment 로 응답하면
- * 모바일/데스크톱 모두 표준 다운로드 동작에 맡길 수 있다.
- *   - Android Chrome: 자동 다운로드 폴더로 저장
- *   - iOS Safari: 다운로드 시트 → "파일" 앱 또는 다른 앱으로 저장
- *   - 데스크톱: 그대로 다운로드 폴더
+ * 알라딘 조회 상태.
+ *
+ * 「못 찾음」과 「아직 조회 안 함」은 다른 상태다. 하나로 뭉치면
+ * 「알라딘에 없는 책」인지 「우리가 아직 안 물어본 책」인지 구분이 사라진다.
  */
-export async function GET(req: NextRequest) {
-  const ctx = await requireUser(req);
-  if (!ctx) return new NextResponse('unauthorized', { status: 401 });
-  const { supabase } = ctx;
+function lookupState(b: BookRow): '찾음' | '못 찾음' | '미조회' {
+  if (b.title) return '찾음';
+  return b.meta_fetched_at ? '못 찾음' : '미조회';
+}
 
-  const { data, error } = await supabase
-    .from('books')
-    .select(BOOK_COLS)
-    .order('last_scanned_at', { ascending: false })
-    .limit(1000);
-  if (error) return new NextResponse(error.message, { status: 500 });
+/** 도서 목록 시트 하나를 만든다. 두 탭이 같은 서식을 쓰도록 한 곳에 둔다. */
+function addBookSheet(
+  wb: ExcelJS.Workbook,
+  name: string,
+  rows: BookRow[],
+  opts: { withState?: boolean } = {},
+) {
+  const ws = wb.addWorksheet(name, { views: [{ state: 'frozen', ySplit: 1 }] });
 
-  const wb = new ExcelJS.Workbook();
-  const ws = wb.addWorksheet('도서 목록', {
-    views: [{ state: 'frozen', ySplit: 1 }],
-  });
-
-  // 열 순서 = 실제로 보는 순서. 제목과 값(가격·수량)을 앞에 두고,
-  // 서지 정보와 스캔 이력은 뒤로 보낸다.
-  ws.columns = [
+  // 열 순서 = 실제로 보는 순서. 제목과 값(가격·수량)을 앞에 둔다.
+  const columns: Partial<ExcelJS.Column>[] = [
     { header: '도서 제목',   key: 'title',            width: 42 },
     { header: 'ISBN',        key: 'isbn',             width: 17 },
     { header: '정가',        key: 'price_standard',   width: 11 },
@@ -58,18 +80,12 @@ export async function GET(req: NextRequest) {
     { header: '최초스캔',    key: 'first_scanned_at', width: 19 },
     { header: '최근스캔',    key: 'last_scanned_at',  width: 19 },
   ];
+  // 못 찾은 탭에서는 「왜 비었나」를 함께 보여준다.
+  if (opts.withState) {
+    columns.splice(2, 0, { header: '조회 상태', key: 'state', width: 11 });
+  }
+  ws.columns = columns;
 
-  const NUMERIC = [
-    'price_standard', 'used_price', 'used_min_price',
-    'used_count', 'price_sales', 'scan_count',
-  ];
-  const DATES = ['first_scanned_at', 'last_scanned_at'];
-
-  const INK   = 'FF1F2937';   // 본문 글자
-  const MUTED = 'FF6B7280';   // 머리글 글자
-  const RULE  = 'FFE5E7EB';   // 가로 구분선
-
-  // 머리글 — 색을 깔지 않는다. 굵기와 아래 선만으로 구분한다.
   const header = ws.getRow(1);
   header.height    = 22;
   header.font      = { name: '맑은 고딕', size: 10, bold: true, color: { argb: MUTED } };
@@ -78,11 +94,11 @@ export async function GET(req: NextRequest) {
     ws.getColumn(key).alignment = { horizontal: 'right', vertical: 'middle' };
   }
 
-  const ordered = (data ?? []).slice().reverse();
-  ordered.forEach((b: any) => {
+  for (const b of rows) {
     const row = ws.addRow({
-      title:            b.title      ?? '',
+      title:            b.title ?? '',
       isbn:             b.isbn,
+      state:            opts.withState ? lookupState(b) : undefined,
       price_standard:   b.price_standard,
       used_price:       b.used_price,
       used_min_price:   b.used_min_price,
@@ -108,7 +124,7 @@ export async function GET(req: NextRequest) {
       const cell = row.getCell(k);
       if (cell.value instanceof Date) cell.numFmt = 'yyyy-mm-dd hh:mm';
     }
-  });
+  }
 
   // 선은 가로 한 줄만. 셀마다 사방을 두르면 눈이 피로하다.
   const lastCol = ws.columnCount;
@@ -121,7 +137,139 @@ export async function GET(req: NextRequest) {
       row.getCell(c).border = { bottom: { style, color: { argb: color } } };
     }
   }
-  ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: lastRow, column: lastCol } };
+  if (lastRow === 1) {
+    // 빈 탭은 「비었다」고 적어 준다. 아무것도 없으면 오류로 오해한다.
+    const empty = ws.addRow({ title: '해당하는 도서가 없습니다.' });
+    empty.font = { name: '맑은 고딕', size: 10, italic: true, color: { argb: MUTED } };
+  } else {
+    ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: lastRow, column: lastCol } };
+  }
+  return ws;
+}
+
+/** 합계에 실제로 기여한 건수를 함께 돌려준다. 분모 없는 합계는 오해를 부른다. */
+function sumOf(rows: BookRow[], key: keyof BookRow): { sum: number; n: number } {
+  let sum = 0;
+  let n = 0;
+  for (const b of rows) {
+    const v = b[key];
+    if (typeof v === 'number' && Number.isFinite(v)) { sum += v; n++; }
+  }
+  return { sum, n };
+}
+
+function addSummarySheet(wb: ExcelJS.Workbook, all: BookRow[], found: BookRow[], missing: BookRow[]) {
+  const ws = wb.addWorksheet('요약', { views: [{ state: 'frozen', ySplit: 1 }] });
+  ws.columns = [
+    { header: '항목', key: 'label', width: 26 },
+    { header: '값',   key: 'value', width: 20 },
+    { header: '비고', key: 'note',  width: 40 },
+  ];
+
+  const header = ws.getRow(1);
+  header.height    = 22;
+  header.font      = { name: '맑은 고딕', size: 10, bold: true, color: { argb: MUTED } };
+  header.alignment = { vertical: 'middle' };
+
+  const pct = (n: number) => (all.length ? `${Math.round((n / all.length) * 100)}%` : '-');
+  const totalScans = all.reduce((a, b) => a + (b.scan_count ?? 0), 0);
+  const notFound = missing.filter((b) => lookupState(b) === '못 찾음').length;
+  const notLooked = missing.filter((b) => lookupState(b) === '미조회').length;
+
+  const priceStd  = sumOf(found, 'price_standard');
+  const usedPrice = sumOf(found, 'used_price');
+  const usedMin   = sumOf(found, 'used_min_price');
+
+  const times = all
+    .map((b) => b.last_scanned_at)
+    .filter((t): t is string => !!t)
+    .sort();
+  const firsts = all
+    .map((b) => b.first_scanned_at)
+    .filter((t): t is string => !!t)
+    .sort();
+
+  type Line = { label: string; value: string | number | Date | null; note?: string; head?: boolean };
+  const lines: Line[] = [
+    { label: '집계 기준',   value: new Date(), note: '이 파일을 내려받은 시각' },
+    { label: '', value: null },
+
+    { label: '도서', value: null, head: true },
+    { label: '담긴 도서',   value: all.length,  note: '중복 없이 ISBN 기준' },
+    { label: '총 스캔',     value: totalScans,  note: '같은 책을 다시 대면 누적됨' },
+    { label: '첫 스캔',     value: firsts.length ? new Date(firsts[0]) : null },
+    { label: '마지막 스캔', value: times.length ? new Date(times[times.length - 1]) : null },
+    { label: '', value: null },
+
+    { label: '알라딘 조회', value: null, head: true },
+    { label: '검색됨',   value: found.length,  note: pct(found.length) },
+    { label: '못 찾음',  value: notFound,      note: '조회했으나 알라딘에 자료 없음' },
+    { label: '미조회',   value: notLooked,     note: '아직 조회하지 않음' },
+    { label: '', value: null },
+
+    { label: '금액 (검색된 것 기준)', value: null, head: true },
+    { label: '정가 합계',     value: priceStd.sum,  note: `${priceStd.n}권 기준 · 값이 있는 것만 합산` },
+    { label: '중고가 합계',   value: usedPrice.sum, note: `${usedPrice.n}권 기준` },
+    { label: '중고최저 합계', value: usedMin.sum,   note: `${usedMin.n}권 기준` },
+    {
+      label: '정가 평균',
+      value: priceStd.n ? Math.round(priceStd.sum / priceStd.n) : null,
+      note: priceStd.n ? `${priceStd.n}권 평균` : '값이 있는 도서가 없음',
+    },
+  ];
+
+  for (const line of lines) {
+    const row = ws.addRow({ label: line.label, value: line.value, note: line.note ?? '' });
+    row.height = 20;
+    row.font = line.head
+      ? { name: '맑은 고딕', size: 10, bold: true, color: { argb: INK } }
+      : { name: '맑은 고딕', size: 10, color: { argb: INK } };
+    row.alignment = { horizontal: 'left', vertical: 'middle' };
+
+    const v = row.getCell('value');
+    if (typeof v.value === 'number') {
+      v.numFmt = '#,##0';
+      v.alignment = { horizontal: 'right', vertical: 'middle' };
+    } else if (v.value instanceof Date) {
+      v.numFmt = 'yyyy-mm-dd hh:mm';
+    }
+    row.getCell('note').font = { name: '맑은 고딕', size: 9, color: { argb: MUTED } };
+    if (line.head) {
+      row.getCell('label').border = { bottom: { style: 'thin', color: { argb: RULE } } };
+    }
+  }
+  return ws;
+}
+
+/**
+ * 서버에서 xlsx 를 만들고 Content-Disposition: attachment 로 응답하면
+ * 모바일/데스크톱 모두 표준 다운로드 동작에 맡길 수 있다.
+ *   - Android Chrome: 자동 다운로드 폴더로 저장
+ *   - iOS Safari: 다운로드 시트 → "파일" 앱 또는 다른 앱으로 저장
+ *   - 데스크톱: 그대로 다운로드 폴더
+ */
+export async function GET(req: NextRequest) {
+  const ctx = await requireUser(req);
+  if (!ctx) return new NextResponse('unauthorized', { status: 401 });
+  const { supabase } = ctx;
+
+  const { data, error } = await supabase
+    .from('books')
+    .select(BOOK_COLS)
+    .order('last_scanned_at', { ascending: false })
+    .limit(1000);
+  if (error) return new NextResponse(error.message, { status: 500 });
+
+  // 오래된 것이 위로 오도록 뒤집는다(스캔한 순서대로 읽힌다).
+  const all = ((data ?? []) as unknown as BookRow[]).slice().reverse();
+  const found   = all.filter((b) => lookupState(b) === '찾음');
+  const missing = all.filter((b) => lookupState(b) !== '찾음');
+
+  const wb = new ExcelJS.Workbook();
+  // 요약을 맨 앞에 둔다. 파일을 열면 먼저 보이는 것이 전체 그림이어야 한다.
+  addSummarySheet(wb, all, found, missing);
+  addBookSheet(wb, '검색됨', found);
+  addBookSheet(wb, '검색 안 됨', missing, { withState: true });
 
   const buf = await wb.xlsx.writeBuffer();
   const filename = `도서목록_${stampNow()}.xlsx`;

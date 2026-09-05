@@ -1,0 +1,98 @@
+name: Android APK
+
+# 언제 도나
+#   · main 에 안드로이드 셸이나 설정이 바뀌었을 때
+#   · 손으로 돌릴 때 (Actions 탭 → Run workflow)
+#   · v* 태그를 밀 때 — 그때는 릴리스에 APK 를 붙인다
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'android/**'
+      - 'www/**'
+      - 'capacitor.config.ts'
+      - 'package.json'
+      - '.github/workflows/android.yml'
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      server_url:
+        description: '앱이 열 사이트 주소 (비우면 기본 배포본)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      # Capacitor 는 JDK 21 을 쓴다. Android Gradle Plugin 이 그 아래를 거부한다.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: android-actions/setup-android@v3
+
+      - name: 의존성 설치
+        run: npm ci
+
+      # 웹 자산과 설정을 안드로이드 프로젝트로 밀어 넣는다.
+      # server.url 을 쓰므로 여기서 옮기는 것은 오프라인 안내 화면과 설정뿐이다.
+      - name: Capacitor 동기화
+        env:
+          CAP_SERVER_URL: ${{ github.event.inputs.server_url }}
+        run: npx cap sync android
+
+      - name: 동기화 결과 확인
+        run: |
+          set -e
+          CFG=android/app/src/main/assets/capacitor.config.json
+          test -f "$CFG" || { echo "::error::$CFG 가 없다 — cap sync 가 돌지 않았다"; exit 1; }
+          echo "--- 앱이 열 주소 ---"
+          node -e "const c=require('./'+process.argv[1]);if(!c.server||!c.server.url){console.error('::error::server.url 이 비어 있다. 앱이 빈 화면을 연다');process.exit(1)}console.log(c.server.url)" "$CFG"
+
+      - name: APK 빌드
+        working-directory: android
+        run: |
+          chmod +x ./gradlew
+          ./gradlew --no-daemon assembleDebug
+
+      - name: 산출물 확인
+        id: apk
+        run: |
+          set -e
+          APK=$(find android/app/build/outputs/apk -name '*.apk' | head -1)
+          test -n "$APK" || { echo "::error::APK 가 만들어지지 않았다"; exit 1; }
+          SIZE=$(stat -c%s "$APK")
+          # 빌드가 통과해도 껍데기만 나오는 경우가 있다. 크기로 한 번 더 막는다.
+          test "$SIZE" -gt 1000000 || { echo "::error::APK 가 너무 작다 ($SIZE bytes)"; exit 1; }
+          echo "path=$APK" >> "$GITHUB_OUTPUT"
+          echo "APK: $APK ($((SIZE/1024)) KB)"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: book-barcode-debug-apk
+          path: ${{ steps.apk.outputs.path }}
+          if-no-files-found: error
+          retention-days: 30
+
+      # 태그를 밀었을 때만 릴리스에 붙인다. 평소에는 Actions 산출물로만 받는다.
+      - name: 태그면 릴리스에 첨부
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.apk.outputs.path }}
+          body: |
+            디버그 서명 APK 입니다. 설치 시 「출처를 알 수 없는 앱」 허용이 필요합니다.
+            앱은 배포된 사이트를 여는 셸이라, 웹을 고치면 앱을 다시 굽지 않아도 반영됩니다.

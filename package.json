@@ -13,6 +13,8 @@
     "bench:scan": "node scripts/scan-bench.mjs"
   },
   "dependencies": {
+    "@capacitor/android": "^8.5.1",
+    "@capacitor/core": "^8.5.1",
     "@supabase/supabase-js": "^2.45.0",
     "@undecaf/zbar-wasm": "^0.10.1",
     "exceljs": "^4.4.0",
@@ -22,6 +24,7 @@
     "zxing-wasm": "^3.1.3"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.5.1",
     "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",

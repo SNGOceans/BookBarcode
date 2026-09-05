@@ -18,3 +18,7 @@ supabase/.temp
 
 # Playwright MCP 로 확인할 때 생기는 스크래치
 .playwright-mcp
+
+# 데스크톱 셸 — 의존성과 설치 파일 산출물
+desktop/node_modules
+desktop/dist

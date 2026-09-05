@@ -181,7 +181,7 @@ export default function ScanLabPage() {
         {running ? `측정 중… ${progress}%` : '▶ 측정 시작'}
       </button>
 
-      {note && <div className="lab-note">⚠ {note}</div>}
+      {note && <div className="lab-note">{note}</div>}
 
       {total > 0 && (
         <>

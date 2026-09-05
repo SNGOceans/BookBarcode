@@ -11,6 +11,7 @@ import {
 import { createFramePreparer } from '@/lib/scanner/frame';
 import { engineSlots, type EngineSlot, type ScanEngine } from '@/lib/scanner/engines';
 import { logDebug, logError, logInfo, logWarn } from '@/lib/logbus';
+import Icon from '@/components/Icon';
 
 type Props = {
   onDetect: (isbn: string) => void;
@@ -47,10 +48,7 @@ export default function Scanner({ onDetect, active }: Props) {
 
   const [error, setError]     = useState<string | null>(null);
   const [running, setRunning] = useState(false);
-  const [aspect, setAspect]   = useState(4 / 3);
   const [locked, setLocked]   = useState(false);
-  const [capture, setCapture] = useState<{ w: number; h: number } | null>(null);
-  const [stat, setStat]       = useState<{ engine: string; ms: number } | null>(null);
   const [zoom, setZoom]       = useState<{ min: number; max: number; step: number; value: number } | null>(null);
   const [torch, setTorch]     = useState<{ supported: boolean; on: boolean }>({ supported: false, on: false });
 
@@ -221,7 +219,13 @@ export default function Scanner({ onDetect, active }: Props) {
           const vw = video.videoWidth;
           const vh = video.videoHeight;
           if (!vw || !vh) return;
-          const kx = cw / vw;
+
+          // 영상은 object-fit: cover 로 화면을 꽉 채운다. 비율이 다르면 좌우나
+          // 위아래가 잘리므로, 화면 좌표로 옮길 때 그 배율과 잘린 만큼을 함께 계산한다.
+          // 이걸 빼먹으면 인식 점이 실제 바코드에서 벗어난 자리에 찍힌다.
+          const fit = Math.max(cw / vw, ch / vh);
+          const offX = (cw - vw * fit) / 2;
+          const toScreenX = (x: number) => offX + x * fit;
 
           // 판독 기준선 — 화면 세로 중앙을 가로지르는 가는 붉은 선.
           // 캔버스에 직접 그린다. 인식 점을 이 선 위에 얹어야 하는데
@@ -248,7 +252,7 @@ export default function Scanner({ onDetect, active }: Props) {
             // 같은 x 에 여러 점이 겹치면 한 번만 그린다(꼭짓점은 위아래가 같은 x 다).
             const seen = new Set<number>();
             for (const p of m.pts) {
-              const x = Math.round(p.x * kx);
+              const x = Math.round(toScreenX(p.x));
               if (x < 0 || x > cw) continue;
               const key = Math.round(x / (3 * dpr));
               if (seen.has(key)) continue;
@@ -412,11 +416,15 @@ export default function Scanner({ onDetect, active }: Props) {
             } finally {
               scanCost = performance.now() - t0;
               scanInFlight = false;
-              // 표시용 수치는 0.5초에 한 번만 갱신한다.
-              // 스캔마다 setState 를 부르면 초당 수십 번 다시 렌더된다.
-              if (!stopped && now - lastStatAt > 500) {
+              // 성능 수치는 화면에 띄우지 않는다 — 사용자가 볼 것이 아니다.
+              // 대신 로그로 남겨 「이 폰에서 왜 느린가」를 나중에 볼 수 있게 한다.
+              // 스캔마다 남기면 로그가 넘치므로 5초에 한 번만.
+              if (!stopped && now - lastStatAt > 5000) {
                 lastStatAt = now;
-                setStat({ engine: slot.name, ms: Math.round(scanCost) });
+                logDebug('scan.cost', `${slot.name} ${Math.round(scanCost)}ms`, {
+                  engine: slot.name,
+                  ms: Math.round(scanCost),
+                });
               }
             }
           }
@@ -427,8 +435,6 @@ export default function Scanner({ onDetect, active }: Props) {
         let lastLoggedRes = '';
         const syncAspect = () => {
           if (video.videoWidth > 0 && video.videoHeight > 0) {
-            setAspect(video.videoWidth / video.videoHeight);
-            setCapture({ w: video.videoWidth, h: video.videoHeight });
             const res = `${video.videoWidth}x${video.videoHeight}`;
             if (res !== lastLoggedRes) {
               lastLoggedRes = res;
@@ -467,34 +473,34 @@ export default function Scanner({ onDetect, active }: Props) {
       setLocked(false);
       setZoom(null);
       setTorch({ supported: false, on: false });
-      setCapture(null);
-      setStat(null);
     };
   }, [active]);
 
   return (
     <div className="scanner-wrap">
-      <div className="scanner" style={{ aspectRatio: String(aspect) }}>
+      <div className="scanner">
         <video  ref={videoRef}   className="scanner-video" muted playsInline />
         <canvas ref={workRef}    className="scanner-work" />
         {/* 기준선과 인식 점은 오버레이 캔버스가 함께 그린다.
             선을 CSS 로 따로 두면 점과 위치가 어긋난다. */}
         <canvas ref={overlayRef} className="scanner-overlay" />
         {!running && !error && active && <div className="scanner-status">카메라 시작 중…</div>}
-        {error && <div className="scanner-status error">⚠ {error}</div>}
-        {!active && <div className="scanner-status">⏸ 정지됨. 시작 버튼을 눌러주세요.</div>}
+        {error && <div className="scanner-status error">{error}</div>}
+        {!active && <div className="scanner-status">정지됨. 아래 시작 버튼을 눌러 주세요.</div>}
         {running && (
           <div className={'scan-badge' + (locked ? ' locked' : '')}>
-            {locked ? '● 바코드 인식 중' : '○ 바코드 찾는 중'}
+            {locked ? '바코드 인식 중' : '바코드 찾는 중'}
           </div>
         )}
       </div>
 
-      {running && (
+      {/* 확대·조명은 멀거나 어두울 때 실제로 쓰는 손잡이라 카메라 바로 아래 둔다.
+          해상도·엔진·소요시간 같은 수치는 사용자가 볼 것이 아니라 로그로 보낸다. */}
+      {running && (zoom || torch.supported) && (
         <div className="scanner-tools">
           {zoom && (
             <label className="zoom">
-              <span>확대</span>
+              <Icon name="zoom" size={16} label="확대" />
               <input
                 type="range"
                 min={zoom.min}
@@ -511,14 +517,12 @@ export default function Scanner({ onDetect, active }: Props) {
               type="button"
               className={'torch' + (torch.on ? ' on' : '')}
               onClick={toggleTorch}
+              aria-label={torch.on ? '조명 끄기' : '조명 켜기'}
+              aria-pressed={torch.on}
             >
-              {torch.on ? '🔦 조명 끄기' : '🔦 조명 켜기'}
+              <Icon name="flash" size={16} />
             </button>
           )}
-          <span className="scan-meta">
-            {capture && <span>{capture.w}×{capture.h}</span>}
-            {stat && <span>{stat.engine} · {stat.ms}ms</span>}
-          </span>
         </div>
       )}
     </div>

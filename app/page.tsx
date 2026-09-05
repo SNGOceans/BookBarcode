@@ -4,6 +4,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import AuthForm from '@/components/AuthForm';
 import LogPanel from '@/components/LogPanel';
+import InventoryPanel from '@/components/InventoryPanel';
+import Icon from '@/components/Icon';
 import { flush, logError, logInfo, logWarn, setShipping } from '@/lib/logbus';
 
 const Scanner = dynamic(() => import('@/components/Scanner'), { ssr: false });
@@ -29,13 +31,7 @@ type Book = {
 
 type Me = { id: string; email: string };
 
-const wonFmt = (n: number) => `${n.toLocaleString('ko-KR')}원`;
-
-function pad2(n: number) { return String(n).padStart(2, '0'); }
-function stampNow(): string {
-  const d = new Date();
-  return `${d.getFullYear()}${pad2(d.getMonth() + 1)}${pad2(d.getDate())}_${pad2(d.getHours())}${pad2(d.getMinutes())}${pad2(d.getSeconds())}`;
-}
+const won = (n: number) => n.toLocaleString('ko-KR');
 
 export default function HomePage() {
   const [me, setMe]               = useState<Me | null>(null);
@@ -43,8 +39,9 @@ export default function HomePage() {
   const [books, setBooks]         = useState<Book[]>([]);
   const [active, setActive]       = useState(false);
   const [toast, setToast]         = useState<string | null>(null);
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [tab, setTab]             = useState<'books' | 'logs'>('books');
+  const [panelOpen, setPanelOpen] = useState(false);
+  const [tab, setTab]             = useState<'books' | 'inventory' | 'logs'>('books');
+  const [focusIsbn, setFocusIsbn] = useState<string | null>(null);
   const inflightRef               = useRef<Set<string>>(new Set());
 
   // 로그인 상태에서만 로그를 서버로 보낸다. 보낼 주인이 없으면 쌓아 둘 이유가 없다.
@@ -52,7 +49,6 @@ export default function HomePage() {
     setShipping(!!me);
     if (!me) return;
     logInfo('session.start', '로그인 세션 시작', { email: me.email });
-    // 화면을 벗어날 때 대기분을 마저 보낸다.
     const onHide = () => { void flush(); };
     document.addEventListener('visibilitychange', onHide);
     return () => {
@@ -136,9 +132,8 @@ export default function HomePage() {
         const next = prev.filter((b) => b.id !== book.id);
         return [book, ...next].slice(0, 1000);
       });
-      const label = book.title ?? book.isbn;
-      showToast(`✔ ${label}${book.scan_count > 1 ? ` ×${book.scan_count}` : ''}`);
-      logInfo('book.record', label, { isbn, scanCount: book.scan_count, hasMeta: !!book.title });
+      showToast(`${book.title ?? book.isbn}${book.scan_count > 1 ? ` ×${book.scan_count}` : ''}`);
+      logInfo('book.record', book.title ?? book.isbn, { isbn, scanCount: book.scan_count });
       feedback(true);
     } catch (e) {
       showToast('네트워크 오류');
@@ -150,15 +145,13 @@ export default function HomePage() {
   }, []);
 
   async function remove(id: number) {
-    if (!confirm('삭제할까요? (스캔 이력도 함께 삭제됩니다)')) return;
+    if (!confirm('목록에서 지울까요? 스캔 이력도 함께 삭제됩니다.')) return;
     const res = await authedFetch(`/api/books/${id}`, { method: 'DELETE' });
     if (res.ok) setBooks((prev) => prev.filter((b) => b.id !== id));
   }
 
   function exportXlsx() {
     if (!books.length) return;
-    // 서버가 Content-Disposition: attachment 로 응답하므로
-    // 단순 a.click() 만으로 모바일/데스크톱 모두 표준 다운로드 동작에 맡길 수 있다.
     const a = document.createElement('a');
     a.href = '/api/export/xlsx';
     a.rel = 'noopener';
@@ -173,159 +166,249 @@ export default function HomePage() {
     setMe(null);
   }
 
-  function onAuthed(user: Me) { setMe(user); }
+  // 스캔을 시작하면 패널을 접는다.
+  // 찍는 동안에는 카메라가 화면을 다 써야 하고, 목록은 그때 볼 것이 아니다.
+  useEffect(() => {
+    if (active) setPanelOpen(false);
+  }, [active]);
 
   const totalScans = books.reduce((acc, b) => acc + b.scan_count, 0);
+  const latest = books[0];
 
-  if (!authReady) {
-    return <main className="page"><div className="loading">…</div></main>;
-  }
+  if (!authReady) return <main className="boot"><span /></main>;
 
   if (!me) {
     return (
       <main className="page auth-page">
-        <header className="header">
-          <h1>📚 Book Barcode <small>zbar-wasm · Supabase · Aladin</small></h1>
-        </header>
-        <AuthForm onAuthed={onAuthed} />
+        <AuthForm onAuthed={(u) => setMe(u)} />
       </main>
     );
   }
 
   return (
     <main className="page">
-      <header className="header">
-        <h1>📚 Book Barcode <small>{me.email}</small></h1>
-        <div className="header-right">
-          <button
-            className="badge-btn"
-            onClick={() => setSidebarOpen((v) => !v)}
-            aria-expanded={sidebarOpen}
-          >
-            📚 <strong>{books.length}</strong>
+      <header className="topbar">
+        <button
+          type="button"
+          className="icon-btn topbar-toggle"
+          onClick={() => setPanelOpen((v) => !v)}
+          aria-label={panelOpen ? '목록 접기' : '목록 펼치기'}
+          aria-expanded={panelOpen}
+        >
+          <Icon name="list" />
+        </button>
+
+        <div className="brand">
+          <Icon name="book" size={18} />
+          <span className="brand-name">Book Barcode</span>
+        </div>
+
+        <div className="topbar-right">
+          <span className="stat" title="담긴 도서">
+            <strong>{books.length}</strong><span className="stat-unit">권</span>
+          </span>
+          <span className="stat dim" title="총 스캔 횟수">
+            <strong>{totalScans}</strong><span className="stat-unit">회</span>
+          </span>
+          <button type="button" className="icon-btn" onClick={() => void logout()} aria-label="로그아웃">
+            <Icon name="logout" />
           </button>
-          <button className="logout" onClick={() => void logout()}>로그아웃</button>
         </div>
       </header>
 
-      <div className="workspace">
+      <div className={'workspace' + (panelOpen ? ' panel-open' : '')}>
+        {/* 왼쪽 패널 — 접으면 아이콘 레일, 펼치면 목록 */}
+        <aside className="panel" aria-label="담긴 도서와 로그">
+          <nav className="panel-tabs">
+            <button
+              type="button"
+              className={'panel-tab' + (tab === 'books' ? ' on' : '')}
+              onClick={() => { setTab('books'); setPanelOpen(true); }}
+              aria-label="담긴 도서"
+            >
+              <Icon name="list" />
+              <span className="panel-tab-text">담긴 도서</span>
+              <span className="panel-tab-count">{books.length}</span>
+            </button>
+            <button
+              type="button"
+              className={'panel-tab' + (tab === 'inventory' ? ' on' : '')}
+              onClick={() => { setTab('inventory'); setPanelOpen(true); }}
+              aria-label="재고"
+            >
+              <Icon name="book" />
+              <span className="panel-tab-text">재고</span>
+            </button>
+            <button
+              type="button"
+              className={'panel-tab' + (tab === 'logs' ? ' on' : '')}
+              onClick={() => { setTab('logs'); setPanelOpen(true); }}
+              aria-label="로그"
+            >
+              <Icon name="terminal" />
+              <span className="panel-tab-text">로그</span>
+            </button>
+            <button
+              type="button"
+              className="icon-btn panel-collapse"
+              onClick={() => setPanelOpen(false)}
+              aria-label="패널 접기"
+            >
+              <Icon name="close" />
+            </button>
+          </nav>
+
+          <div className="panel-body">
+            {tab === 'books' ? (
+              <>
+                <div className="panel-actions">
+                  <button type="button" onClick={exportXlsx} disabled={!books.length}>
+                    <Icon name="download" size={16} /> 엑셀로 내보내기
+                  </button>
+                  <button type="button" className="icon-btn" onClick={() => void load()} aria-label="새로고침">
+                    <Icon name="refresh" size={16} />
+                  </button>
+                </div>
+
+                {!books.length ? (
+                  <div className="empty">
+                    <Icon name="search" size={22} />
+                    <p>아직 담긴 책이 없습니다.<br />바코드를 비추면 여기에 쌓입니다.</p>
+                  </div>
+                ) : (
+                  <ul className="booklist">
+                    {books.map((b) => (
+                      <BookRow
+                        key={b.id}
+                        b={b}
+                        onRemove={() => void remove(b.id)}
+                        onStock={() => { setFocusIsbn(b.isbn); setTab('inventory'); }}
+                      />
+                    ))}
+                  </ul>
+                )}
+              </>
+            ) : tab === 'inventory' ? (
+              <InventoryPanel focusIsbn={focusIsbn} onConsumedFocus={() => setFocusIsbn(null)} />
+            ) : (
+              <LogPanel />
+            )}
+          </div>
+
+          {/* 메뉴 — 자주 쓰지 않지만 어딘가엔 있어야 하는 것들 */}
+          <div className="panel-menu">
+            <a className="menu-item" href="/scan-lab">
+              <Icon name="alert" size={16} />
+              <span className="menu-text">스캔 진단</span>
+            </a>
+            <button type="button" className="menu-item" onClick={() => void load()}>
+              <Icon name="sync" size={16} />
+              <span className="menu-text">목록 다시 불러오기</span>
+            </button>
+            <div className="menu-account">
+              <span className="menu-email" title={me.email}>{me.email}</span>
+              <button type="button" className="icon-btn" onClick={() => void logout()} aria-label="로그아웃">
+                <Icon name="logout" size={16} />
+              </button>
+            </div>
+          </div>
+        </aside>
+
+        {panelOpen && (
+          <button
+            type="button"
+            className="panel-scrim"
+            aria-label="패널 닫기"
+            onClick={() => setPanelOpen(false)}
+          />
+        )}
+
         <section className="stage">
           <Scanner active={active} onDetect={handleDetect} />
 
-          <div className="controls">
+          {/* 카메라 아래 빈 곳에 방금 담긴 책을 둔다. 찍자마자 무엇이 들어갔는지 보인다. */}
+          <div className="recent">
+            {latest ? (
+              <button type="button" className="recent-row" onClick={() => { setTab('books'); setPanelOpen(true); }}>
+                <span className="recent-label">방금 담김</span>
+                <span className="recent-title">{latest.title ?? latest.isbn}</span>
+                {latest.scan_count > 1 && <span className="count-pill">×{latest.scan_count}</span>}
+                <Icon name="chevron-right" size={16} />
+              </button>
+            ) : (
+              <p className="recent-hint">바코드를 붉은 선에 맞춰 주세요.</p>
+            )}
+          </div>
+
+          <div className="actionbar">
             <button
-              className={'primary ' + (active ? 'stop' : '')}
+              type="button"
+              className={'primary' + (active ? ' stop' : '')}
               onClick={() => setActive((v) => !v)}
             >
-              {active ? '■ 스캔 정지' : '▶ 스캔 시작'}
+              <Icon name={active ? 'stop' : 'play'} size={16} />
+              {active ? '스캔 정지' : '스캔 시작'}
             </button>
           </div>
         </section>
-
-        {/* 목록은 한 벌만 둔다. 데스크톱에서는 오른쪽 고정 열,
-            좁은 화면에서는 위로 덮는 패널 — 화면 크기만 CSS 로 가른다. */}
-        <aside className={'sidebar' + (sidebarOpen ? ' open' : '')}>
-          <div className="sidebar-head">
-            <div className="sidebar-tabs">
-              <button
-                className={'sidebar-tab' + (tab === 'books' ? ' on' : '')}
-                onClick={() => setTab('books')}
-              >
-                📚 도서 <strong>{books.length}</strong>
-              </button>
-              <button
-                className={'sidebar-tab' + (tab === 'logs' ? ' on' : '')}
-                onClick={() => setTab('logs')}
-              >
-                🛠 로그
-              </button>
-            </div>
-            <button
-              className="sidebar-close"
-              onClick={() => setSidebarOpen(false)}
-              aria-label="패널 닫기"
-            >
-              ✕
-            </button>
-          </div>
-
-          {tab === 'books' ? (
-            <>
-              <div className="sidebar-sub">
-                <span>담긴 도서 <strong>{books.length}</strong></span>
-                <span className="muted">총 스캔 <strong>{totalScans}</strong>회</span>
-              </div>
-              <div className="toolbar">
-                <button onClick={exportXlsx} disabled={!books.length}>⬇ XLSX</button>
-                <button onClick={() => void load()}>↻ 새로고침</button>
-              </div>
-              {!books.length && (
-                <div className="empty">아직 담긴 책이 없습니다.<br />바코드를 비추면 여기에 쌓입니다.</div>
-              )}
-              <ul className="cards">
-                {books.map((b) => <BookCard key={b.id} b={b} onRemove={() => void remove(b.id)} />)}
-              </ul>
-            </>
-          ) : (
-            <LogPanel />
-          )}
-        </aside>
       </div>
 
-      {sidebarOpen && (
-        <button className="sidebar-scrim" aria-label="목록 닫기" onClick={() => setSidebarOpen(false)} />
+      {toast && (
+        <div className="toast" role="status">
+          <Icon name="check" size={16} />
+          <span>{toast}</span>
+        </div>
       )}
-
-      {toast && <div className="toast">{toast}</div>}
     </main>
   );
 }
 
-function BookCard({ b, onRemove }: { b: Book; onRemove: () => void }) {
-  const hasCover = !!b.cover_url;
+/**
+ * 목록 한 줄.
+ *
+ * 카드가 아니라 행이다 — 한 화면에 많이 보이는 것이 이 화면의 목적이다.
+ * 표지가 없으면 ISBN 끝자리를 자리표시로 쓴다. 빈 사각형보다 구분이 쉽다.
+ */
+function BookRow({ b, onRemove, onStock }: { b: Book; onRemove: () => void; onStock: () => void }) {
+  const price = b.price_standard;
+  const used  = b.used_price ?? b.used_min_price;
+  const untitled = !b.title;
+
   return (
-    <li className={'book-card' + (hasCover ? '' : ' no-cover')}>
-      {hasCover && (
-        <div className="cover">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={b.cover_url!} alt="" loading="lazy" referrerPolicy="no-referrer" />
+    <li className={'book-row' + (untitled ? ' untitled' : '')}>
+      <div className="book-thumb" aria-hidden="true">
+        {b.cover_url
+          // eslint-disable-next-line @next/next/no-img-element
+          ? <img src={b.cover_url} alt="" loading="lazy" referrerPolicy="no-referrer" />
+          : <span>{b.isbn.slice(-3)}</span>}
+      </div>
+
+      <div className="book-main">
+        <div className="book-line">
+          <span className="book-title">{b.title ?? '제목 미확인'}</span>
+          {b.scan_count > 1 && <span className="count-pill">×{b.scan_count}</span>}
         </div>
-      )}
-      <div className="body">
-        <div className="title-row">
-          <h3 className="title">{b.title ?? '(메타 없음)'}</h3>
-          {b.scan_count > 1 && <span className="scan-count">×{b.scan_count}</span>}
-          <button className="del" onClick={onRemove} aria-label="삭제">✕</button>
+        <div className="book-sub">
+          {b.author ? <span>{b.author}</span> : <span className="dim">{b.isbn}</span>}
+          {b.publisher && <span className="dim">{b.publisher}</span>}
         </div>
-        {(b.author || b.translator || b.publisher) && (
-          <div className="meta">
-            {b.author && <span>{b.author}</span>}
-            {b.translator && <span>· {b.translator} 옮김</span>}
-            {b.publisher && <span>· {b.publisher}</span>}
+        {(price != null || used != null) && (
+          <div className="book-price">
+            {price != null && <span>정가 <b>{won(price)}</b></span>}
+            {used != null && <span className="used">중고 <b>{won(used)}</b></span>}
+            {b.used_count != null && <span className="dim">{b.used_count}건</span>}
           </div>
         )}
-        {/* 순서는 엑셀 열 순서와 맞춘다 — 두 곳이 다르면 대조할 때마다 헷갈린다. */}
-        <div className="prices">
-          {b.price_standard != null && <Price label="정가"      value={wonFmt(b.price_standard)} />}
-          {b.used_price     != null && <Price label="중고가"    value={wonFmt(b.used_price)}     used />}
-          {b.used_min_price != null && <Price label="중고최저"  value={wonFmt(b.used_min_price)} used />}
-          {b.used_count     != null && <Price label="중고수량"  value={`${b.used_count.toLocaleString('ko-KR')}권`} used />}
-          {b.price_sales    != null && <Price label="판매가"    value={wonFmt(b.price_sales)} />}
-        </div>
-        <div className="card-footer">
-          <span className="isbn">{b.isbn}</span>
-          <span className="time">{new Date(b.last_scanned_at).toLocaleString('ko-KR')}</span>
-        </div>
+      </div>
+
+      <div className="book-actions">
+        <button type="button" className="book-stock" onClick={onStock} aria-label="재고 잡기">
+          <Icon name="book" size={15} />
+        </button>
+        <button type="button" className="book-del" onClick={onRemove} aria-label="목록에서 지우기">
+          <Icon name="trash" size={15} />
+        </button>
       </div>
     </li>
-  );
-}
-
-function Price({ label, value, used }: { label: string; value: string; used?: boolean }) {
-  return (
-    <span className={'price' + (used ? ' used' : '')}>
-      <span className="price-label">{label}</span>
-      <span className="price-value">{value}</span>
-    </span>
   );
 }

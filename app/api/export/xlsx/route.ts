@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireUser } from '@/lib/supabase/server';
 import { isFound, lookupState } from '@/lib/book-meta';
+import { toExcelKst } from '@/lib/datetime';
 import ExcelJS from 'exceljs';
 
 export const runtime = 'nodejs';
@@ -98,8 +99,9 @@ function addBookSheet(
       translator:       b.translator ?? '',
       publisher:        b.publisher  ?? '',
       scan_count:       b.scan_count,
-      first_scanned_at: b.first_scanned_at ? new Date(b.first_scanned_at) : null,
-      last_scanned_at:  b.last_scanned_at  ? new Date(b.last_scanned_at)  : null,
+      // 엑셀은 Date 를 UTC 기준 숫자로 담는다. 한국 시각으로 보이게 맞춰 넣는다.
+      first_scanned_at: toExcelKst(b.first_scanned_at),
+      last_scanned_at:  toExcelKst(b.last_scanned_at),
     });
     row.height    = 20;
     row.font      = { name: '맑은 고딕', size: 10, color: { argb: INK } };
@@ -137,6 +139,90 @@ function addBookSheet(
   return ws;
 }
 
+type InventoryRow = {
+  quantity: number;
+  location: string | null;
+  condition: string | null;
+  memo: string | null;
+  updated_at: string | null;
+  books: {
+    isbn: string; title: string | null; author: string | null; publisher: string | null;
+    price_standard: number | null; used_price: number | null;
+  } | null;
+};
+
+/** 재고 시트. 도서 목록과 다른 표라 서식을 따로 짠다. */
+function addInventorySheet(wb: ExcelJS.Workbook, rows: InventoryRow[]) {
+  const ws = wb.addWorksheet('재고', { views: [{ state: 'frozen', ySplit: 1 }] });
+  ws.columns = [
+    { header: '도서 제목', key: 'title',     width: 40 },
+    { header: 'ISBN',      key: 'isbn',      width: 17 },
+    { header: '수량',      key: 'quantity',  width: 8  },
+    { header: '위치',      key: 'location',  width: 14 },
+    { header: '상태',      key: 'condition', width: 12 },
+    { header: '정가',      key: 'price',     width: 11 },
+    { header: '정가×수량', key: 'amount',    width: 13 },
+    { header: '중고가',    key: 'used',      width: 11 },
+    { header: '저자',      key: 'author',    width: 18 },
+    { header: '출판사',    key: 'publisher', width: 16 },
+    { header: '메모',      key: 'memo',      width: 24 },
+    { header: '최근 변경', key: 'updated',   width: 19 },
+  ];
+  const nums = ['quantity', 'price', 'amount', 'used'];
+
+  const header = ws.getRow(1);
+  header.height    = 22;
+  header.font      = { name: '맑은 고딕', size: 10, bold: true, color: { argb: MUTED } };
+  header.alignment = { vertical: 'middle' };
+  for (const k of nums) ws.getColumn(k).alignment = { horizontal: 'right', vertical: 'middle' };
+
+  for (const r of rows) {
+    const price = r.books?.price_standard ?? null;
+    const row = ws.addRow({
+      title:     r.books?.title ?? '',
+      isbn:      r.books?.isbn ?? '',
+      quantity:  r.quantity,
+      location:  r.location  ?? '',
+      condition: r.condition ?? '',
+      price,
+      // 정가가 없으면 곱셈 결과도 비운다. 0 으로 두면 「0원짜리 재고」로 읽힌다.
+      amount:    price != null ? price * r.quantity : null,
+      used:      r.books?.used_price ?? null,
+      author:    r.books?.author ?? '',
+      publisher: r.books?.publisher ?? '',
+      memo:      r.memo ?? '',
+      updated:   toExcelKst(r.updated_at),
+    });
+    row.height    = 20;
+    row.font      = { name: '맑은 고딕', size: 10, color: { argb: INK } };
+    row.alignment = { horizontal: 'left', vertical: 'middle' };
+    for (const k of nums) {
+      const cell = row.getCell(k);
+      cell.alignment = { horizontal: 'right', vertical: 'middle' };
+      if (typeof cell.value === 'number') cell.numFmt = '#,##0';
+    }
+    const u = row.getCell('updated');
+    if (u.value instanceof Date) u.numFmt = 'yyyy-mm-dd hh:mm';
+  }
+
+  const lastCol = ws.columnCount;
+  const lastRow = ws.rowCount;
+  for (let r = 1; r <= lastRow; r++) {
+    const row = ws.getRow(r);
+    const style: 'thin' | 'medium' = r === 1 ? 'medium' : 'thin';
+    const color = r === 1 ? MUTED : RULE;
+    for (let c = 1; c <= lastCol; c++) {
+      row.getCell(c).border = { bottom: { style, color: { argb: color } } };
+    }
+  }
+  if (lastRow === 1) {
+    const empty = ws.addRow({ title: '잡아 둔 재고가 없습니다.' });
+    empty.font = { name: '맑은 고딕', size: 10, italic: true, color: { argb: MUTED } };
+  } else {
+    ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: lastRow, column: lastCol } };
+  }
+}
+
 /** 합계에 실제로 기여한 건수를 함께 돌려준다. 분모 없는 합계는 오해를 부른다. */
 function sumOf(rows: BookRow[], key: keyof BookRow): { sum: number; n: number } {
   let sum = 0;
@@ -148,7 +234,13 @@ function sumOf(rows: BookRow[], key: keyof BookRow): { sum: number; n: number } 
   return { sum, n };
 }
 
-function addSummarySheet(wb: ExcelJS.Workbook, all: BookRow[], found: BookRow[], missing: BookRow[]) {
+function addSummarySheet(
+  wb: ExcelJS.Workbook,
+  all: BookRow[],
+  found: BookRow[],
+  missing: BookRow[],
+  inv: InventoryRow[],
+) {
   const ws = wb.addWorksheet('요약', { views: [{ state: 'frozen', ySplit: 1 }] });
   ws.columns = [
     { header: '항목', key: 'label', width: 26 },
@@ -170,6 +262,17 @@ function addSummarySheet(wb: ExcelJS.Workbook, all: BookRow[], found: BookRow[],
   const usedPrice = sumOf(found, 'used_price');
   const usedMin   = sumOf(found, 'used_min_price');
 
+  const invQty = inv.reduce((a, r) => a + (r.quantity ?? 0), 0);
+  // 정가가 있는 품목만 센다. 분모를 함께 적어야 숫자가 오해를 안 부른다.
+  const invValue = inv.reduce(
+    (acc, r) => {
+      const p = r.books?.price_standard;
+      if (typeof p === 'number') { acc.sum += p * (r.quantity ?? 0); acc.n++; }
+      return acc;
+    },
+    { sum: 0, n: 0 },
+  );
+
   const times = all
     .map((b) => b.last_scanned_at)
     .filter((t): t is string => !!t)
@@ -181,7 +284,7 @@ function addSummarySheet(wb: ExcelJS.Workbook, all: BookRow[], found: BookRow[],
 
   type Line = { label: string; value: string | number | Date | null; note?: string; head?: boolean };
   const lines: Line[] = [
-    { label: '집계 기준',   value: new Date(), note: '이 파일을 내려받은 시각' },
+    { label: '집계 기준',   value: toExcelKst(new Date()), note: '이 파일을 내려받은 시각 (한국 시간)' },
     { label: '', value: null },
 
     { label: '도서', value: null, head: true },
@@ -205,6 +308,16 @@ function addSummarySheet(wb: ExcelJS.Workbook, all: BookRow[], found: BookRow[],
       label: '정가 평균',
       value: priceStd.n ? Math.round(priceStd.sum / priceStd.n) : null,
       note: priceStd.n ? `${priceStd.n}권 평균` : '값이 있는 도서가 없음',
+    },
+    { label: '', value: null },
+
+    { label: '재고', value: null, head: true },
+    { label: '재고 품목', value: inv.length, note: '재고를 잡아 둔 도서 수' },
+    { label: '재고 총 수량', value: invQty, note: '모든 품목의 수량 합' },
+    {
+      label: '재고 정가 합',
+      value: invValue.sum,
+      note: invValue.n ? `정가가 있는 ${invValue.n}품목만 합산` : '정가가 있는 품목이 없음',
     },
   ];
 
@@ -251,13 +364,24 @@ export async function GET(req: NextRequest) {
   if (error) return new NextResponse(error.message, { status: 500 });
 
   // 오래된 것이 위로 오도록 뒤집는다(스캔한 순서대로 읽힌다).
+  // 재고는 없을 수도 있다. 조회가 실패해도 도서 목록은 내보낸다 —
+  // 한쪽이 비었다고 파일 전체를 못 받게 하면 더 나쁘다.
+  const { data: invData, error: invError } = await supabase
+    .from('inventory')
+    .select('quantity, location, condition, memo, updated_at, ' +
+            'books!inner(isbn, title, author, publisher, price_standard, used_price)')
+    .order('updated_at', { ascending: false })
+    .limit(1000);
+  const inv = (invError ? [] : (invData ?? [])) as unknown as InventoryRow[];
+
   const all = ((data ?? []) as unknown as BookRow[]).slice().reverse();
   const found   = all.filter(isFound);
   const missing = all.filter((b) => !isFound(b));
 
   const wb = new ExcelJS.Workbook();
   // 요약을 맨 앞에 둔다. 파일을 열면 먼저 보이는 것이 전체 그림이어야 한다.
-  addSummarySheet(wb, all, found, missing);
+  addSummarySheet(wb, all, found, missing, inv);
+  addInventorySheet(wb, inv);
   addBookSheet(wb, '검색됨', found);
   addBookSheet(wb, '검색 안 됨', missing, { withState: true });
 

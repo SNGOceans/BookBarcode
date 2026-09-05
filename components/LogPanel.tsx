@@ -12,6 +12,8 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
+import Icon from '@/components/Icon';
+import { formatTime } from '@/lib/datetime';
 import {
   clearEntries,
   formatEntry,
@@ -163,12 +165,16 @@ export default function LogPanel() {
 
       <div className="log-actions">
         {mode === 'stored' && (
-          <button onClick={() => void loadStored()} disabled={busy}>↻ 새로고침</button>
+          <button onClick={() => void loadStored()} disabled={busy}>
+            <Icon name="refresh" size={13} /> 새로고침
+          </button>
         )}
         <button onClick={() => void syncPlatform()} disabled={busy}>
-          ⇩ 플랫폼 로그
+          <Icon name="download" size={13} /> 플랫폼 로그
         </button>
-        <button onClick={() => void copyAll()}>⧉ 복사</button>
+        <button onClick={() => void copyAll()}>
+          <Icon name="copy" size={13} /> 복사
+        </button>
         <button onClick={() => void wipe()} disabled={busy}>비우기</button>
       </div>
 
@@ -184,7 +190,7 @@ export default function LogPanel() {
         {mode === 'live'
           ? (shown as LogEntry[]).map((e) => (
               <li key={e.id} className={`log-row ${e.level}`}>
-                <span className="log-time">{new Date(e.at).toLocaleTimeString('ko-KR')}</span>
+                <span className="log-time">{formatTime(e.at)}</span>
                 <span className="log-event">{e.event}</span>
                 {e.message && <span className="log-msg">{e.message}</span>}
                 {e.meta && <span className="log-meta">{JSON.stringify(e.meta)}</span>}
@@ -192,7 +198,7 @@ export default function LogPanel() {
             ))
           : (shown as StoredLog[]).map((s) => (
               <li key={s.id} className={`log-row ${s.level}`}>
-                <span className="log-time">{new Date(s.logged_at).toLocaleTimeString('ko-KR')}</span>
+                <span className="log-time">{formatTime(s.logged_at)}</span>
                 <span className="log-src">{s.source}</span>
                 <span className="log-event">{s.event}</span>
                 {s.message && <span className="log-msg">{s.message}</span>}

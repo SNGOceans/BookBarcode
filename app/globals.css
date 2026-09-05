@@ -287,6 +287,11 @@ b, strong { font-weight: 600; }
 .state.wait { color: var(--warn); background: rgba(251, 191, 36, .12); }
 
 .row-actions { display: flex; gap: 2px; }
+/* 줄 전체가 상세로 가는 문일 때. 눌러도 되는 것임을 커서와 초점 테두리로 알린다. */
+.dtable.tappable tbody tr { cursor: pointer; }
+.dtable.tappable tbody tr:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: -2px;
+}
 /* 값이 없다는 표시. 값과 같은 색이면 「0」처럼 읽힌다. */
 .none { color: var(--text-mute); opacity: .6; }
 
@@ -621,6 +626,116 @@ b, strong { font-weight: 600; }
   box-shadow: inset 0 0 0 1px var(--line);
 }
 
+/* ---------------------------------------------------------- 도서 상세 시트 */
+
+/* 층위: 내비 50 · 토스트 60. 시트는 내비 위, 토스트 아래에 둔다 —
+   시트가 떠 있어도 「담겼습니다」 같은 알림은 보여야 한다. */
+.sheet-scrim {
+  position: fixed; inset: 0; z-index: 55;
+  display: flex; align-items: flex-end; justify-content: center;
+  background: rgba(2, 6, 16, .68);
+  animation: scrim-in .14s ease;
+}
+@keyframes scrim-in { from { opacity: 0; } }
+
+.sheet {
+  position: relative;
+  width: 100%; max-width: 460px; max-height: 88vh;
+  display: flex; flex-direction: column;
+  overflow-y: auto; overscroll-behavior: contain;
+  padding: 8px 16px calc(16px + env(safe-area-inset-bottom));
+  background: var(--surface);
+  border: 1px solid var(--line); border-bottom: 0;
+  border-radius: 16px 16px 0 0;
+  animation: sheet-up .18s cubic-bezier(.2, .8, .3, 1);
+}
+@keyframes sheet-up { from { transform: translateY(16px); opacity: 0; } }
+
+/* 손잡이. 위로 끌어 올린 판이라는 것을 말없이 알린다. */
+.sheet-grip {
+  flex: none; width: 36px; height: 4px; margin: 0 auto 10px;
+  background: var(--line); border-radius: 999px;
+}
+.sheet-close {
+  position: absolute; top: 10px; right: 10px;
+  width: 32px; height: 32px; display: grid; place-items: center;
+  background: transparent; border: 0; border-radius: 8px; color: var(--text-mute);
+}
+.sheet-close:hover { color: var(--text); background: var(--raised); }
+
+.sheet-head { display: flex; gap: 14px; align-items: flex-start; padding-right: 30px; }
+
+.sheet-cover {
+  position: relative; flex: none;
+  width: 104px; height: 148px; padding: 0;
+  background: var(--bg); border: 1px solid var(--line); border-radius: 8px;
+  overflow: hidden; display: grid; place-items: center;
+}
+.sheet-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.sheet-cover:disabled { cursor: default; }
+.sheet-cover-none { font-size: 11.5px; color: var(--text-mute); }
+/* 「눌러서 크게」를 아이콘 하나로 알린다. 글로 적으면 표지를 가린다. */
+.sheet-zoom {
+  position: absolute; right: 5px; bottom: 5px;
+  width: 22px; height: 22px; display: grid; place-items: center;
+  background: rgba(2, 6, 16, .62); border-radius: 6px; color: #fff;
+}
+
+.sheet-title { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.sheet-title h2 {
+  margin: 2px 0 0; font-size: 16.5px; font-weight: 600; line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.sheet-title .state { align-self: flex-start; }
+.sheet-by  { margin: 0; font-size: 12.5px; color: var(--text-dim); }
+.sheet-pub { margin: 0; font-size: 12px; color: var(--text-mute); }
+
+.sheet-list {
+  margin: 16px 0 0; padding: 0;
+  border-top: 1px solid var(--line-soft);
+}
+.sheet-row {
+  display: flex; align-items: baseline; gap: 12px;
+  padding: 8px 2px; border-bottom: 1px solid var(--line-soft);
+}
+.sheet-row dt {
+  flex: none; width: 84px; font-size: 12px; color: var(--text-mute);
+}
+.sheet-row dd {
+  flex: 1; min-width: 0; margin: 0;
+  font-size: 13.5px; font-variant-numeric: tabular-nums;
+}
+.sheet-row dd small { margin-left: 2px; font-size: 11px; color: var(--text-mute); }
+.sheet-row dd .used { color: var(--warn); }
+
+.isbn-copy {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 2px 7px; margin-left: -7px;
+  background: transparent; border: 0; border-radius: 6px;
+  color: var(--text); font-size: 13px;
+}
+.isbn-copy:hover { background: var(--raised); }
+.isbn-copy svg { color: var(--text-mute); }
+
+.sheet-actions { display: flex; gap: 8px; margin-top: 16px; }
+
+/* 확대. 표지만 남기고 나머지를 덮는다 — 작은 그림이라도 이때는 크게 본다. */
+.lightbox {
+  position: fixed; inset: 0; z-index: 75;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+  padding: 24px;
+  background: rgba(2, 6, 16, .93);
+  animation: scrim-in .14s ease;
+}
+/* ⚠️ `max-width` 만 주면 원본이 작을 때 그대로 작게 뜬다 — 확대가 되지 않는다.
+   폭을 채워 키운다. 원본이 작으면 뭉개지지만, 그것이 「크게 보기」의 답이다. */
+.lightbox img {
+  width: min(100%, 460px); height: auto; max-height: 78vh;
+  object-fit: contain; border-radius: 6px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, .6);
+}
+.lightbox p { margin: 0; font-size: 12px; color: var(--text-mute); }
+
 /* ---------------------------------------------------------- 토스트 */
 
 .toast {
@@ -801,7 +916,10 @@ b, strong { font-weight: 600; }
   /* 최근 시각은 값들 뒤 자기 줄에. 카드 안에서 가장 덜 보는 값이다. */
   .dtable .c-when { order: 3; flex: 1 1 100%; font-size: 11px; }
 
-  /* 터치에는 hover 가 없다. 늘 보이게 두고 테두리로 눌 수 있는 것임을 알린다. */
+  /* 터치에는 hover 가 없다. 눌린 순간을 색으로 돌려주지 않으면 먹었는지 알 수 없다. */
+  .dtable.tappable tbody tr:active { background: var(--raised); }
+
+  /* 동작 버튼도 hover 가 없으니 늘 보이게 두고 테두리로 눌 수 있음을 알린다. */
   .row-actions { gap: 6px; }
   .book-stock, .book-del {
     width: 34px; height: 32px; opacity: 1;

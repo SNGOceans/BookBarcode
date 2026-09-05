@@ -16,6 +16,7 @@
 import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Icon from '@/components/Icon';
+import BookSheet from '@/components/BookSheet';
 import { useApp, type Book } from '@/components/AppShell';
 import { isFound, lookupState } from '@/lib/book-meta';
 import { formatDateTime } from '@/lib/datetime';
@@ -38,6 +39,7 @@ export default function BooksPage() {
   const { books, reloadBooks, dropBook, authedFetch } = useApp();
   const router = useRouter();
   const [filter, setFilter] = useState<Filter>('all');
+  const [openId, setOpenId] = useState<number | null>(null);
 
   const { found, missing } = useMemo(() => ({
     found:   books.filter(isFound),
@@ -46,10 +48,14 @@ export default function BooksPage() {
 
   const rows = filter === 'found' ? found : filter === 'missing' ? missing : books;
 
+  /* 열린 책은 **id 로** 들고 있는다. 객체를 들고 있으면 목록이 갱신돼도
+     시트가 옛 값을 계속 보여준다. */
+  const open = openId == null ? null : books.find((b) => b.id === openId) ?? null;
+
   async function remove(b: Book) {
     if (!confirm(`${b.title ?? b.isbn}를 목록에서 지울까요?\n스캔 이력도 함께 삭제됩니다.`)) return;
     const res = await authedFetch(`/api/books/${b.id}`, { method: 'DELETE' });
-    if (res.ok) dropBook(b.id);
+    if (res.ok) { dropBook(b.id); setOpenId(null); }
   }
 
   const TABS: { key: Filter; label: string; n: number; tone?: 'warn' }[] = [
@@ -102,7 +108,7 @@ export default function BooksPage() {
         </div>
       ) : (
         <div className="pane-scroll">
-          <table className="dtable with-cover">
+          <table className="dtable with-cover tappable">
             <thead>
               <tr>
                 <th className="c-cover" aria-label="표지" />
@@ -126,7 +132,18 @@ export default function BooksPage() {
                 const people = [b.author, b.translator && `${b.translator} 옮김`, b.publisher]
                   .filter(Boolean).join(' · ');
                 return (
-                  <tr key={b.id} className={ok ? '' : 'row-untitled'}>
+                  <tr
+                    key={b.id}
+                    className={ok ? '' : 'row-untitled'}
+                    /* 줄 전체가 상세로 가는 문이다. 표의 줄에는 기본 초점이 없으므로
+                       키보드에서도 열리도록 초점과 키 처리를 직접 얹는다. */
+                    role="button" tabIndex={0}
+                    aria-label={`${b.title ?? b.isbn} 상세 보기`}
+                    onClick={() => setOpenId(b.id)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpenId(b.id); }
+                    }}
+                  >
                     <td className="c-cover">
                       <div className="thumb" aria-hidden="true">
                         {b.cover_url
@@ -164,7 +181,8 @@ export default function BooksPage() {
                     </td>
                     <td className="num" data-label="스캔">{b.scan_count}</td>
                     <td className="c-when dim" data-label="최근">{formatDateTime(b.last_scanned_at)}</td>
-                    <td className="c-act">
+                    {/* 줄을 누르면 상세가 열린다. 버튼은 제 일만 하고 그 흐름을 막는다. */}
+                    <td className="c-act" onClick={(e) => e.stopPropagation()}>
                       <div className="row-actions">
                         <button
                           type="button" className="book-stock" aria-label="재고 잡기"
@@ -186,6 +204,15 @@ export default function BooksPage() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {open && (
+        <BookSheet
+          book={open}
+          onClose={() => setOpenId(null)}
+          onStock={(b) => router.push(`/inventory?isbn=${encodeURIComponent(b.isbn)}`)}
+          onRemove={(b) => void remove(b)}
+        />
       )}
     </div>
   );

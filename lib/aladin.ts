@@ -80,6 +80,9 @@ export async function lookupAladin(isbn: string): Promise<AladinMeta | null> {
     + `?ttbkey=${encodeURIComponent(KEY)}`
     + '&itemIdType=ISBN13'
     + `&ItemId=${encodeURIComponent(isbn)}`
+    // Cover=Big — 상세 화면에서 표지를 확대해 본다. 기본값은 목록용 작은 그림이라
+    // 키우면 뭉개진다. 목록의 34px 썸네일도 같은 주소를 줄여 쓰면 그만이다.
+    + '&Cover=Big'
     + '&output=JS&Version=20131101&OptResult=usedList';
 
   let res: Response;

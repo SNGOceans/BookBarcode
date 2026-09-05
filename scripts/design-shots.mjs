@@ -196,6 +196,23 @@ try {
     await shoot(page, 'm8-도서-미확인');
   }
 
+  // 도서 상세 시트 — 카드를 누르면 열린다. 표지 확대까지 이어서 본다.
+  await page.goto(BASE + '/books', { waitUntil: 'networkidle' });
+  await settle(page);
+  await page.locator('.dtable tbody tr').first().click();
+  await page.waitForTimeout(600);
+  await shoot(page, 'm11-도서상세');
+  const cover = page.locator('.sheet-cover');
+  if (await cover.isEnabled()) {
+    await cover.click();
+    await page.waitForTimeout(500);
+    await shoot(page, 'm12-표지확대');
+    await page.locator('.lightbox').click();
+    await page.waitForTimeout(300);
+  }
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(300);
+
   // 재고 편집 펼침
   await page.goto(BASE + '/inventory', { waitUntil: 'networkidle' });
   await settle(page);

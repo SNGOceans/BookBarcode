@@ -11,7 +11,7 @@
  * 뒤로 가기를 안 먹으면 목록째로 화면을 빠져나간다.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Icon from '@/components/Icon';
 import type { Book } from '@/components/AppShell';
 import { lookupState } from '@/lib/book-meta';
@@ -69,16 +69,28 @@ export default function BookSheet({ book, onClose, onStock, onRemove }: Props) {
     return () => window.removeEventListener('keydown', onKey);
   }, [back]);
 
-  // 뒤로 가기용 한 칸. 우리가 닫을 때는 그 칸을 되감아 히스토리에 찌꺼기를 남기지 않는다.
+  /* 뒤로 가기용 한 칸. 우리가 닫을 때는 그 칸을 되감아 히스토리에 찌꺼기를 남기지 않는다.
+     ⚠️ 이 효과는 **딱 한 번만** 돌아야 한다. 부모가 넘겨주는 onClose 는 렌더마다
+     새 함수라 의존성에 넣으면 렌더마다 칸을 밀어 넣고 되감아, 정작 뒤로 가기가
+     아무 일도 하지 않게 된다(실기기에서 확인). 콜백은 ref 로 최신 것을 본다. */
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+  const zoomRef = useRef(zoom);
+  zoomRef.current = zoom;
+
   useEffect(() => {
     history.pushState({ sheet: true }, '');
-    const onPop = () => onClose();
+    const onPop = () => {
+      // 확대가 떠 있으면 확대만 닫고 칸을 도로 채운다. 다음 뒤로 가기가 시트를 닫는다.
+      if (zoomRef.current) { setZoom(false); history.pushState({ sheet: true }, ''); return; }
+      closeRef.current();
+    };
     window.addEventListener('popstate', onPop);
     return () => {
       window.removeEventListener('popstate', onPop);
       if (history.state?.sheet) history.back();
     };
-  }, [onClose]);
+  }, []);
 
   // 시트가 떠 있는 동안 뒤 목록이 같이 굴러다니면 어디를 만지는지 알 수 없다.
   useEffect(() => {

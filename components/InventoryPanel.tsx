@@ -210,19 +210,24 @@ export default function InventoryPanel({ focusIsbn, onConsumedFocus }: Props) {
                   </div>
 
                   <div className="stepper">
-                    <button type="button" onClick={() => void adjust(i.isbn, -1)} disabled={busy || i.quantity === 0} aria-label="한 권 줄이기">−</button>
+                    <button type="button" onClick={() => void adjust(i.isbn, -1)} disabled={busy || i.quantity === 0} aria-label="한 권 줄이기">
+                      <Icon name="minus" size={15} />
+                    </button>
                     <span className="stepper-value">{i.quantity}</span>
-                    <button type="button" onClick={() => void adjust(i.isbn, +1)} disabled={busy} aria-label="한 권 늘리기">+</button>
+                    <button type="button" onClick={() => void adjust(i.isbn, +1)} disabled={busy} aria-label="한 권 늘리기">
+                      <Icon name="plus" size={15} />
+                    </button>
                   </div>
 
+                  {/* 펼침 여부를 화살표 방향으로 보여 준다. 고정된 화살표는 아무 말도 안 한다. */}
                   <button
                     type="button"
                     className="icon-btn inv-edit"
                     onClick={() => (open ? setEditing(null) : openEdit(i.isbn, i))}
-                    aria-label={open ? '편집 닫기' : '편집'}
+                    aria-label={open ? '편집 닫기' : '편집 열기'}
                     aria-expanded={open}
                   >
-                    <Icon name="chevron-right" size={15} />
+                    <Icon name={open ? 'chevron-up' : 'chevron-down'} size={16} />
                   </button>
                 </div>
 

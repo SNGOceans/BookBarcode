@@ -18,7 +18,9 @@ type Props = {
 export type IconName =
   | 'book' | 'list' | 'terminal' | 'close' | 'download' | 'refresh'
   | 'play' | 'stop' | 'zoom' | 'flash' | 'copy' | 'trash' | 'logout'
-  | 'search' | 'check' | 'alert' | 'sync' | 'chevron-right';
+  | 'search' | 'check' | 'alert' | 'sync' | 'cart' | 'shield'
+  | 'chevron-right' | 'chevron-down' | 'chevron-up'
+  | 'panel-open' | 'panel-close' | 'plus' | 'minus' | 'edit';
 
 const PATHS: Record<IconName, React.ReactNode> = {
   book: (
@@ -106,7 +108,46 @@ const PATHS: Record<IconName, React.ReactNode> = {
       <path d="M21 4v4h-4M3 20v-4h4" />
     </>
   ),
+  cart: (
+    <>
+      <circle cx="9" cy="20" r="1.4" />
+      <circle cx="18" cy="20" r="1.4" />
+      <path d="M2 3h2.5l2.4 12.2a1.5 1.5 0 0 0 1.5 1.2h9.1a1.5 1.5 0 0 0 1.5-1.2L21 7H5.5" />
+    </>
+  ),
+  shield: (
+    <>
+      <path d="M12 3l7.5 3v5.5c0 4.5-3 8.3-7.5 9.5-4.5-1.2-7.5-5-7.5-9.5V6z" />
+      <path d="M9.2 12.2l2 2 3.6-3.9" />
+    </>
+  ),
   'chevron-right': <path d="M9 5l7 7-7 7" />,
+  'chevron-down':  <path d="M5 9l7 7 7-7" />,
+  'chevron-up':    <path d="M5 15l7-7 7 7" />,
+  // 패널이 열릴지 닫힐지를 화살표 방향으로 알려 준다.
+  // 방향이 고정이면 아이콘이 아무 말도 하지 않는다.
+  'panel-open': (
+    <>
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="M9 4v16" />
+      <path d="M14 10l2 2-2 2" />
+    </>
+  ),
+  'panel-close': (
+    <>
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="M9 4v16" />
+      <path d="M16 10l-2 2 2 2" />
+    </>
+  ),
+  plus:  <path d="M12 5v14M5 12h14" />,
+  minus: <path d="M5 12h14" />,
+  edit: (
+    <>
+      <path d="M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17z" />
+      <path d="M14.5 6.5l3 3" />
+    </>
+  ),
 };
 
 /** 면으로 그리는 아이콘. 선 아이콘과 섞이면 굵기가 안 맞아 따로 표시한다. */

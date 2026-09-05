@@ -478,21 +478,35 @@ export default function Scanner({ onDetect, active }: Props) {
 
   return (
     <div className="scanner-wrap">
-      <div className="scanner">
-        <video  ref={videoRef}   className="scanner-video" muted playsInline />
-        <canvas ref={workRef}    className="scanner-work" />
-        {/* 기준선과 인식 점은 오버레이 캔버스가 함께 그린다.
-            선을 CSS 로 따로 두면 점과 위치가 어긋난다. */}
-        <canvas ref={overlayRef} className="scanner-overlay" />
-        {!running && !error && active && <div className="scanner-status">카메라 시작 중…</div>}
-        {error && <div className="scanner-status error">{error}</div>}
-        {!active && <div className="scanner-status">정지됨. 아래 시작 버튼을 눌러 주세요.</div>}
-        {running && (
-          <div className={'scan-badge' + (locked ? ' locked' : '')}>
-            {locked ? '바코드 인식 중' : '바코드 찾는 중'}
+      {/* 꺼져 있을 때는 카메라 영역을 띄우지 않는다.
+          아무것도 안 나오는 검은 상자는 「고장인가」로 읽힌다. */}
+      {!active ? (
+        <div className="scanner idle">
+          <div className="idle-box">
+            <Icon name="search" size={30} />
+            <p className="idle-title">스캔 준비됨</p>
+            <p className="idle-hint">
+              아래 시작 버튼을 누르면 카메라가 켜집니다.<br />
+              바코드를 화면 가운데 붉은 선에 맞춰 주세요.
+            </p>
           </div>
-        )}
-      </div>
+        </div>
+      ) : (
+        <div className="scanner">
+          <video  ref={videoRef}   className="scanner-video" muted playsInline />
+          <canvas ref={workRef}    className="scanner-work" />
+          {/* 기준선과 인식 점은 오버레이 캔버스가 함께 그린다.
+              선을 CSS 로 따로 두면 점과 위치가 어긋난다. */}
+          <canvas ref={overlayRef} className="scanner-overlay" />
+          {!running && !error && <div className="scanner-status">카메라 시작 중…</div>}
+          {error && <div className="scanner-status error">{error}</div>}
+          {running && (
+            <div className={'scan-badge' + (locked ? ' locked' : '')}>
+              {locked ? '바코드 인식 중' : '바코드 찾는 중'}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* 확대·조명은 멀거나 어두울 때 실제로 쓰는 손잡이라 카메라 바로 아래 둔다.
           해상도·엔진·소요시간 같은 수치는 사용자가 볼 것이 아니라 로그로 보낸다. */}

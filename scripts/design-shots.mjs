@@ -151,38 +151,48 @@ try {
     await page.waitForTimeout(400);
   }
 
-  // 왼쪽 패널 — 도서 탭
+  // 열린 내비게이션
   const openBtn = page.locator('.topbar-toggle');
-  if (await openBtn.count()) {
-    await openBtn.click();
+  if (!(await openBtn.count())) {
+    throw new Error('메뉴 버튼(.topbar-toggle)을 못 찾았다 — 선택자가 낡았다');
+  }
+  await openBtn.click();
+  await settle(page);
+  await shoot(page, 'm3-메뉴');
+  await page.keyboard.press('Escape').catch(() => {});
+  await page.locator('.nav-scrim').click({ timeout: 2000 }).catch(() => {});
+  await page.waitForTimeout(300);
+
+  // 각 화면은 이제 **경로**다. 탭을 누르는 것이 아니라 이동한다.
+  for (const [path, name] of [
+    ['/books',     'm4-도서'],
+    ['/inventory', 'm5-재고'],
+    ['/sales',     'm6-판매'],
+    ['/logs',      'm7-로그'],
+  ]) {
+    await page.goto(BASE + path, { waitUntil: 'networkidle' });
     await settle(page);
-    await shoot(page, 'm3-목록');
+    await shoot(page, name);
+  }
 
-    // 왼쪽 패널 — 재고 탭
-    // ⚠️ 이름으로 찾으면 패널 밖의 다른 버튼과 겹친다. 탭 자체를 짚는다.
-    const invTab = page.locator('.panel-tab', { hasText: '재고' });
-    if (await invTab.count()) {
-      await invTab.first().click();
-      await page.waitForTimeout(900);
-      await shoot(page, 'm4-재고');
-      // 편집 폼을 펼친 모습도 남긴다
-      const edit = page.locator('.inv-edit').first();
-      if (await edit.count()) {
-        await edit.click();
-        await page.waitForTimeout(500);
-        await shoot(page, 'm5-재고편집');
-      }
-    }
+  // 도서 화면의 서브탭 — 확인 안 됨
+  await page.goto(BASE + '/books', { waitUntil: 'networkidle' });
+  await settle(page);
+  const missTab = page.locator('.subtab', { hasText: '확인 안 됨' });
+  if (await missTab.count()) {
+    await missTab.first().click();
+    await page.waitForTimeout(500);
+    await shoot(page, 'm8-도서-미확인');
+  }
 
-    // 왼쪽 패널 — 로그 탭
-    const logTab = page.locator('.panel-tab', { hasText: '로그' });
-    if (await logTab.count()) {
-      await logTab.first().click();
-      await page.waitForTimeout(700);
-      await shoot(page, 'm6-로그');
-    }
-  } else {
-    throw new Error('패널 여는 버튼(.topbar-toggle)을 못 찾았다 — 선택자가 낡았다');
+  // 재고 편집 펼침
+  await page.goto(BASE + '/inventory', { waitUntil: 'networkidle' });
+  await settle(page);
+  const edit = page.locator('.inv-edit').first();
+  if (await edit.count()) {
+    await edit.click();
+    await page.waitForTimeout(500);
+    await shoot(page, 'm9-재고편집');
   }
 
   // 로그인 화면
@@ -191,7 +201,7 @@ try {
   await anonPage.route('**/api/auth/me', (r) => r.fulfill({ json: { user: null } }));
   await anonPage.goto(BASE, { waitUntil: 'networkidle' });
   await settle(anonPage);
-  await shoot(anonPage, "m7-로그인");
+  await shoot(anonPage, 'm10-로그인');
   await anon.close();
   await phone.close();
 

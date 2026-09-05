@@ -13,7 +13,13 @@ import type { CapacitorConfig } from '@capacitor/cli';
  *    그러면 판독이 wasm 경로로만 돈다. `/scan-lab` 을 앱에서 열어 확인할 것.
  */
 
-const SITE_URL = process.env.CAP_SERVER_URL ?? 'https://book-barcode.vercel.app';
+const DEFAULT_SITE_URL = 'https://book-barcode.vercel.app';
+
+// ⚠️ `??` 를 쓰면 안 된다.
+// CI 의 workflow_dispatch 입력은 값을 안 넣어도 **빈 문자열**로 들어오는데,
+// `??` 는 null·undefined 만 거르므로 빈 문자열이 그대로 주소가 된다.
+// 그러면 빌드는 멀쩡히 통과하고 앱만 빈 화면을 연다.
+const SITE_URL = (process.env.CAP_SERVER_URL || '').trim() || DEFAULT_SITE_URL;
 
 const config: CapacitorConfig = {
   appId: 'com.sngoceans.bookbarcode',

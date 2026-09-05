@@ -1,0 +1,216 @@
+name: Release
+
+# 안드로이드 APK 와 윈도우 설치 파일을 굽고 **릴리스에 올린다.**
+#
+#   main 에 push  → `latest` 릴리스를 갱신한다(항상 최신 빌드가 받아진다)
+#   v* 태그 push  → 그 버전의 정식 릴리스를 만든다
+#   수동 실행     → 여는 주소를 바꿔 구울 수 있다(스테이징 확인용)
+#
+# ⚠️ paths 필터를 두지 않는다.
+#    한 push 트리거에 branches·tags·paths 를 같이 두면 **태그를 밀었을 때
+#    경로 필터에 걸려 워크플로가 통째로 건너뛴다.** 그러면 릴리스가 안 나오는데
+#    실패로도 안 잡혀서 「왜 안 올라오지」만 남는다. 빌드는 2분이라 매번 돌린다.
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      site_url:
+        description: '앱이 열 사이트 주소 (비우면 기본 배포본)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  android:
+    name: 안드로이드 APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      # Capacitor 는 JDK 21 을 쓴다. Android Gradle Plugin 이 그 아래를 거부한다.
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+
+      - name: 의존성 설치
+        run: npm ci
+
+      - name: Capacitor 동기화
+        env:
+          CAP_SERVER_URL: ${{ github.event.inputs.site_url }}
+        run: npx cap sync android
+
+      - name: 여는 주소 확인
+        run: |
+          set -e
+          CFG=android/app/src/main/assets/capacitor.config.json
+          test -f "$CFG" || { echo "::error::$CFG 가 없다 — cap sync 가 돌지 않았다"; exit 1; }
+          node -e "const c=require('./'+process.argv[1]);if(!c.server||!c.server.url){console.error('::error::server.url 이 비어 있다. 앱이 빈 화면을 연다');process.exit(1)}console.log('여는 주소:',c.server.url)" "$CFG"
+
+      - name: APK 빌드
+        working-directory: android
+        run: |
+          chmod +x ./gradlew
+          ./gradlew --no-daemon assembleDebug
+
+      # 릴리스에 붙일 이름을 여기서 고정한다. app-debug.apk 로 올리면
+      # 받는 사람이 무엇인지 알 수 없다.
+      - name: 산출물 확인·이름 정리
+        run: |
+          set -e
+          APK=$(find android/app/build/outputs/apk -name '*.apk' | head -1)
+          test -n "$APK" || { echo "::error::APK 가 만들어지지 않았다"; exit 1; }
+          SIZE=$(stat -c%s "$APK")
+          # 빌드가 통과해도 껍데기만 나오는 경우가 있다. 크기로 한 번 더 막는다.
+          test "$SIZE" -gt 1000000 || { echo "::error::APK 가 너무 작다 ($SIZE bytes)"; exit 1; }
+          mkdir -p out && cp "$APK" out/BookReader.apk
+          echo "BookReader.apk — $((SIZE/1024)) KB"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: out/BookReader.apk
+          if-no-files-found: error
+
+  windows:
+    name: 윈도우 설치 파일
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: 의존성 설치
+        working-directory: desktop
+        run: npm install
+
+      - name: 설치 파일 빌드
+        working-directory: desktop
+        env:
+          DESKTOP_SITE_URL: ${{ github.event.inputs.site_url }}
+          # 서명하지 않는다. 서명서를 찾다가 멈추지 않게 명시한다.
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: npm run dist
+
+      - name: 산출물 확인
+        shell: bash
+        run: |
+          set -e
+          EXE="desktop/dist/BookReaderSetup.exe"
+          test -f "$EXE" || { echo "::error::$EXE 가 만들어지지 않았다"; ls -la desktop/dist || true; exit 1; }
+          SIZE=$(stat -c%s "$EXE")
+          test "$SIZE" -gt 40000000 || { echo "::error::설치 파일이 너무 작다 ($SIZE bytes)"; exit 1; }
+          echo "BookReaderSetup.exe — $((SIZE/1024/1024)) MB"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-setup
+          path: desktop/dist/BookReaderSetup.exe
+          if-no-files-found: error
+
+  release:
+    name: 릴리스에 올리기
+    needs: [android, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: 받을 파일 확인
+        run: |
+          set -e
+          ls -la dist
+          test -f dist/BookReader.apk        || { echo "::error::APK 가 없다"; exit 1; }
+          test -f dist/BookReaderSetup.exe   || { echo "::error::설치 파일이 없다"; exit 1; }
+
+      # 릴리스 설명을 파일로 만든다.
+      # ⚠️ heredoc 을 쓰지 않는다 — YAML 안에서는 들여쓰기 때문에 종료 표시가
+      #    닫히지 않아 스크립트가 통째로 깨진다. 줄 단위 echo 가 안전하다.
+      - name: 릴리스 설명 작성
+        run: |
+          set -e
+          {
+            echo "### 받는 파일"
+            echo ""
+            echo "| 파일 | 설명 |"
+            echo "|---|---|"
+            echo "| \`BookReaderSetup.exe\` | 윈도우 설치 파일 |"
+            echo "| \`BookReader.apk\` | 안드로이드 설치 파일 |"
+            echo ""
+            echo "두 앱 모두 배포된 사이트를 여는 창입니다."
+            echo "웹이 갱신되면 다시 설치하지 않아도 반영됩니다."
+            echo ""
+            echo "- 윈도우: 서명하지 않은 파일이라 SmartScreen 경고가 뜹니다. 「추가 정보」 → 「실행」."
+            echo "- 안드로이드: 「출처를 알 수 없는 앱」 설치 허용이 필요합니다."
+          } > notes.md
+          if [[ "$GITHUB_REF" != refs/tags/v* ]]; then
+            {
+              echo ""
+              echo "---"
+              echo ""
+              echo "main 최신 커밋(\`${GITHUB_SHA:0:7}\`)으로 구운 빌드입니다."
+              echo "커밋이 올라갈 때마다 이 릴리스가 갱신됩니다."
+              echo ""
+              echo "항상 최신을 받는 주소:"
+              echo ""
+              echo "    https://github.com/${GITHUB_REPOSITORY}/releases/download/latest/BookReaderSetup.exe"
+              echo "    https://github.com/${GITHUB_REPOSITORY}/releases/download/latest/BookReader.apk"
+            } >> notes.md
+          fi
+          cat notes.md
+
+      # 태그를 밀었을 때 — 그 버전의 정식 릴리스
+      - name: 버전 릴리스
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          TAG="${GITHUB_REF#refs/tags/}"
+          gh release create "$TAG" --title "$TAG" --notes-file notes.md \
+            dist/BookReaderSetup.exe dist/BookReader.apk
+
+      # 평소 main push — 항상 최신 빌드를 받을 수 있는 고정 릴리스
+      #
+      # 지우고 다시 만든다. 같은 태그에 파일만 덮어쓰면 예전 파일이 남아
+      # 무엇이 최신인지 알 수 없게 되는 경우가 있다.
+      - name: 최신 빌드 릴리스 갱신
+        if: "!startsWith(github.ref, 'refs/tags/v')"
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          gh release delete latest --yes --cleanup-tag 2>/dev/null || true
+          gh release create latest \
+            --title "최신 빌드" \
+            --prerelease \
+            --target "$GITHUB_SHA" \
+            --notes-file notes.md \
+            dist/BookReaderSetup.exe dist/BookReader.apk
+
+      - name: 올라간 것 확인
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          TAG="latest"
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then TAG="${GITHUB_REF#refs/tags/}"; fi
+          echo "--- $TAG 릴리스 자산 ---"
+          gh release view "$TAG" --json assets --jq '.assets[] | "\(.name) — \(.size/1024/1024|floor)MB"'
+          # 「릴리스는 만들어졌는데 파일이 안 붙었다」를 여기서 막는다.
+          COUNT=$(gh release view "$TAG" --json assets --jq '.assets | length')
+          test "$COUNT" -eq 2 || { echo "::error::자산이 2개가 아니다 ($COUNT개)"; exit 1; }

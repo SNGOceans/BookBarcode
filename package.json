@@ -3,10 +3,14 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "predev": "node scripts/copy-wasm.mjs",
     "dev": "next dev",
+    "prebuild": "node scripts/copy-wasm.mjs",
     "build": "next build",
     "start": "next start",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "node --test scripts/*.test.mjs",
+    "bench:scan": "node scripts/scan-bench.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",
@@ -14,7 +18,8 @@
     "exceljs": "^4.4.0",
     "next": "^16.0.0",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "zxing-wasm": "^3.1.3"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

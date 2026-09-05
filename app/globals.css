@@ -249,14 +249,25 @@ b, strong { font-weight: 600; }
 .dtable .mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
 .dtable .c-act { width: 1%; white-space: nowrap; }
 .dtable .c-qty { width: 1%; }
-.dtable .c-title { max-width: 0; }
+.dtable .c-cover { width: 1%; padding-right: 0; }
+/* 날짜가 세 줄로 접히면 행 높이가 그 칸 하나 때문에 세 배가 된다. */
+.dtable .c-when { white-space: nowrap; }
+/* 값 열이 많다. 남는 폭은 제목과 사람 이름이 나눠 갖고, 둘 다 넘치면 줄인다. */
+.dtable .c-title { max-width: 0; width: 34%; }
+.dtable .c-people {
+  max-width: 0; width: 26%;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 .cell-title {
   display: block; font-weight: 600; color: var(--text);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .cell-isbn { display: block; font-size: 10.5px; color: var(--text-mute); margin-top: 1px; }
 .row-untitled .cell-title { color: var(--text-mute); font-weight: 500; }
-.row-short { background: rgba(251, 191, 36, .07); }
+/* 재고보다 많이 담긴 줄. hover 배경과 카드 배경이 둘 다 이것을 덮으므로
+   같은 무게(클래스 두 개)로 다시 못박는다 — 색이 사라지면 경고가 사라진다. */
+.dtable tr.row-short,
+.dtable tbody tr.row-short:hover { background: rgba(251, 191, 36, .1); }
 
 .cell-input {
   width: 82px; height: 30px; padding: 0 8px;
@@ -289,41 +300,18 @@ b, strong { font-weight: 600; }
 }
 .warn-note.bad { background: rgba(248, 113, 113, .1); color: #fca5a5; }
 
-/* ---- 목록: 카드가 아니라 행. 한 화면에 많이 보이는 것이 목적이다 ---- */
+/* ---- 표지 ----
+   책은 제목보다 표지로 먼저 알아본다. 표를 훑을 때 눈이 걸리는 지점이 필요하다.
+   그림이 없을 때는 ISBN 끝 세 자리를 대신 넣는다 — 빈 칸은 「없는 책」처럼 보인다. */
 
-.booklist {
-  flex: 1; min-height: 0;
-  list-style: none; margin: 0; padding: 0 0 8px;
-  overflow-y: auto; overscroll-behavior: contain;
-}
-
-.book-row {
-  display: grid;
-  grid-template-columns: 34px minmax(0, 1fr) 30px;
-  gap: 10px; align-items: center;
-  padding: 8px 8px 8px 10px;
-  border-bottom: 1px solid var(--line-soft);
-}
-.book-row:hover { background: var(--raised); }
-
-.book-thumb {
+.thumb {
   width: 34px; height: 46px; border-radius: 4px;
   background: var(--bg); border: 1px solid var(--line);
   display: grid; place-items: center; overflow: hidden;
-  font-size: 11px; font-weight: 600; color: var(--text-mute);
+  font-size: 10.5px; font-weight: 600; color: var(--text-mute);
   font-variant-numeric: tabular-nums;
 }
-.book-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
-
-.book-main { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-
-.book-line { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.book-title {
-  flex: 1; min-width: 0;
-  font-size: 13.5px; font-weight: 600; line-height: 1.35;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.book-row.untitled .book-title { color: var(--text-mute); font-weight: 500; }
+.thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
 
 .count-pill {
   flex: none;
@@ -334,22 +322,6 @@ b, strong { font-weight: 600; }
   border-radius: 999px; padding: 1px 6px;
 }
 
-.book-sub {
-  display: flex; gap: 6px; min-width: 0;
-  font-size: 11.5px; color: var(--text-dim);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.book-sub span { overflow: hidden; text-overflow: ellipsis; }
-
-.book-price {
-  display: flex; gap: 10px;
-  font-size: 11.5px; color: var(--text-dim);
-  font-variant-numeric: tabular-nums;
-}
-.book-price b { color: var(--text); font-weight: 600; }
-.book-price .used b { color: var(--warn); }
-
-.book-actions { display: flex; flex-direction: column; gap: 2px; }
 .book-stock, .book-del {
   width: 28px; height: 26px;
   display: grid; place-items: center;
@@ -360,7 +332,7 @@ b, strong { font-weight: 600; }
 .book-stock:hover { color: var(--accent); background: rgba(56, 189, 248, .1); }
 /* 지우기는 파괴적이다. 눈에 먼저 들어오면 안 된다. */
 .book-del { opacity: .45; }
-.book-row:hover .book-del { opacity: 1; }
+.dtable tbody tr:hover .book-del { opacity: 1; }
 .book-del:hover { color: var(--danger); background: rgba(248, 113, 113, .1); }
 
 /* ---------------------------------------------------------- 재고 */
@@ -585,24 +557,40 @@ b, strong { font-weight: 600; }
   background: var(--surface);
 }
 .recent-row {
-  display: flex; align-items: center; gap: 8px;
-  width: 100%; min-height: 46px; padding: 8px 10px;
+  display: flex; align-items: center; gap: 9px;
+  width: 100%; padding: 8px 10px;
   background: transparent; border: 0;
   color: var(--text); text-align: left;
   /* 링크로 바뀌었다. 밑줄이 남으면 글자마다 줄이 그어져 지저분하다. */
   text-decoration: none;
 }
 .recent-row:active { background: var(--raised); }
+.recent-row .thumb { flex: none; }
+/* 세 줄이 표지(46px) 높이에 맞게 들어간다. 카메라가 쓸 자리를 더 뺏지 않는다. */
+.recent-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.recent-head { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .recent-label {
   flex: none; font-size: 10.5px; font-weight: 600; letter-spacing: .02em;
   color: var(--accent);
   background: rgba(56, 189, 248, .1);
-  padding: 3px 7px; border-radius: 5px;
+  padding: 2px 6px; border-radius: 5px;
 }
 .recent-title {
-  flex: 1; min-width: 0; font-size: 13px; font-weight: 500;
+  flex: 1; min-width: 0; font-size: 13px; font-weight: 600;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+.recent-sub {
+  font-size: 11.5px; color: var(--text-dim);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.recent-money {
+  display: flex; gap: 5px; align-items: baseline;
+  font-size: 11.5px; color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap; overflow: hidden;
+}
+.recent-money b { font-weight: 500; color: var(--text-mute); font-size: 10.5px; }
+.recent-money b + b { margin-left: 5px; }
 .recent-row svg { flex: none; color: var(--text-mute); }
 .recent-hint {
   margin: 0; padding: 13px 12px;
@@ -766,24 +754,52 @@ b, strong { font-weight: 600; }
   }
   .dtable td.num { text-align: left; }
 
-  /* 제목이 맨 위 한 줄을 통째로 쓴다. 그다음 상태 칩, 값들, 오른쪽 끝에 동작. */
-  .dtable .c-title { order: 0; flex: 1 1 100%; max-width: none; }
-  .dtable .c-title::before { display: none; }
-  .cell-title { white-space: normal; font-size: 13.5px; }
-  .cell-isbn { display: inline; margin-left: 6px; }
+  /* ⚠️ 열 폭 지정은 반드시 여기서 함께 푼다.
+     `.dtable td` 의 `width: auto` 는 클래스가 하나뿐이라 `.dtable .c-qty` 같은
+     두 클래스 규칙에 진다. 넓은 화면의 `width: 1%` 가 카드까지 따라와
+     표지는 3px 로 눌렸고 수량 스테퍼 위로 금액이 겹쳤다.
+     열 폭 클래스를 새로 만들면 이 줄에도 반드시 더한다. */
+  .dtable .c-cover, .dtable .c-act, .dtable .c-qty,
+  .dtable .c-title, .dtable .c-people, .dtable .c-when { width: auto; }
 
-  .dtable .c-state { order: 1; }
-  .dtable .c-state::before { display: none; }
-
-  /* 동작은 자기 줄을 갖는다. 값들 끝에 붙이면 자리가 모자랄 때 카드 밖으로 잘린다. */
-  .dtable .c-act {
-    order: 3; flex: 1 1 100%; justify-content: flex-end;
-    margin-top: 4px;
-  }
+  /* 표지와 동작 버튼은 **흐름 밖**에 둔다. 카드마다 같은 자리에 있어야 찾기 쉽고,
+     흐름에 넣으면 줄바꿈 위치가 제목 길이에 따라 달라져 칩이 버튼 위로 겹친다. */
+  .dtable tr { position: relative; }
+  .dtable.with-cover tr { padding-left: 56px; min-height: 66px; }
+  .dtable .c-cover { position: absolute; left: 12px; top: 11px; padding: 0; }
+  .dtable .c-act { position: absolute; right: 10px; top: 8px; }
   .dtable .c-act::before { display: none; }
 
-  /* 최근 시각은 좁은 화면에서 뺀다. 자리를 먹는 것에 비해 덜 본다. */
-  .dtable .c-when { display: none; }
+  /* 제목이 맨 윗줄을 통째로 쓴다. 오른쪽 끝은 버튼이 덮으므로 그만큼 비워 둔다. */
+  .dtable .c-title {
+    order: 0; flex: 1 1 100%; max-width: none;
+    padding-right: 80px; min-height: 32px;
+  }
+  .dtable .c-title::before { display: none; }
+  .cell-title { white-space: normal; font-size: 13.5px; }
+  /* 제목 옆에 붙여 한 줄을 아낀다. 통째로 넘어가야지 「재 / 고 4」로 쪼개지면 안 된다. */
+  .cell-isbn { display: inline-block; margin-left: 6px; white-space: nowrap; }
+
+  /* 값이 없는 칸은 좁은 화면에서 숨긴다. 넓은 화면은 열을 맞춰야 하므로 줄표를 남긴다.
+     「중고가 — 중고최저 — 중고수량 —」이 줄줄이 남으면 있는 값이 묻힌다. */
+  .dtable td[data-empty] { display: none; }
+
+  /* 상태 칩과 지은이는 제목 아래 **같은 줄**을 나눠 쓴다. 제목이 줄을 다 쓰므로
+     둘이 첫 줄로 딸려 올라갈 일은 없고, 칩에 줄을 따로 주면 카드가 한 줄 길어진다. */
+  .dtable .c-state { order: 1; flex: 0 0 auto; }
+  .dtable .c-state::before { display: none; }
+  /* 기준 폭을 「한 줄에서 칩 자리만 뺀 만큼」으로 잡는다.
+     ⚠️ `flex: 1 1 0` 으로 두면 값 칸들까지 이 줄로 딸려 올라와
+     지은이가 한 글자 폭으로 눌린다 — 기준 폭이 커야 이 줄을 혼자 쓴다. */
+  .dtable .c-people {
+    order: 1; flex: 1 1 calc(100% - 92px); min-width: 0;
+    max-width: none; white-space: normal; overflow: visible;
+    font-size: 11.5px; line-height: 1.5;
+  }
+  .dtable .c-people::before { display: none; }
+
+  /* 최근 시각은 값들 뒤 자기 줄에. 카드 안에서 가장 덜 보는 값이다. */
+  .dtable .c-when { order: 3; flex: 1 1 100%; font-size: 11px; }
 
   /* 터치에는 hover 가 없다. 늘 보이게 두고 테두리로 눌 수 있는 것임을 알린다. */
   .row-actions { gap: 6px; }

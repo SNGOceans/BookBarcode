@@ -72,13 +72,31 @@ export default function ScanPage() {
     <div className="stage">
       <Scanner active={active} onDetect={handleDetect} />
 
-      {/* 카메라 아래 빈 곳에 방금 담긴 책을 둔다. 찍자마자 무엇이 들어갔는지 보인다. */}
+      {/* 카메라 아래 빈 곳에 방금 담긴 책을 둔다. 찍자마자 무엇이 들어갔는지 보인다.
+          표지까지 보여야 「맞게 찍혔나」를 제목을 읽지 않고도 안다. */}
       <div className="recent">
         {latest ? (
           <Link href="/books" className="recent-row">
-            <span className="recent-label">방금 담김</span>
-            <span className="recent-title">{latest.title ?? latest.isbn}</span>
-            {latest.scan_count > 1 && <span className="count-pill">×{latest.scan_count}</span>}
+            <span className="thumb" aria-hidden="true">
+              {latest.cover_url
+                // eslint-disable-next-line @next/next/no-img-element
+                ? <img src={latest.cover_url} alt="" referrerPolicy="no-referrer" />
+                : <span>{latest.isbn.slice(-3)}</span>}
+            </span>
+            <span className="recent-main">
+              <span className="recent-head">
+                <span className="recent-label">방금 담김</span>
+                <span className="recent-title">{latest.title ?? latest.isbn}</span>
+                {latest.scan_count > 1 && <span className="count-pill">×{latest.scan_count}</span>}
+              </span>
+              <span className="recent-sub">
+                {[latest.author, latest.publisher].filter(Boolean).join(' · ') || latest.isbn}
+              </span>
+              <span className="recent-money">
+                <b>정가</b> {latest.price_standard?.toLocaleString('ko-KR') ?? '—'}
+                <b>중고</b> {(latest.used_price ?? latest.used_min_price)?.toLocaleString('ko-KR') ?? '—'}
+              </span>
+            </span>
             <Icon name="chevron-right" size={16} />
           </Link>
         ) : (

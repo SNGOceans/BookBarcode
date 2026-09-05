@@ -19,6 +19,17 @@ const BASE = process.argv[3] || 'http://localhost:3000';
 
 mkdirSync(OUT_DIR, { recursive: true });
 
+/**
+ * 표지 자리를 재려면 그림이 실제로 들어와야 한다. 바깥 그림을 받아 오면 캡처가
+ * 네트워크에 따라 달라지므로, 비율만 같은 색면을 data URI 로 물린다.
+ */
+const cover = (hex) =>
+  'data:image/svg+xml;utf8,' +
+  encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="120" height="163">` +
+    `<rect width="120" height="163" fill="${hex}"/></svg>`,
+  );
+
 /** 화면 배치를 판단하려면 길이가 다양해야 한다. 실제 도서 정보가 아닌 예시다. */
 const SAMPLE_BOOKS = [
   {
@@ -26,7 +37,7 @@ const SAMPLE_BOOKS = [
     first_scanned_at: '2026-09-05T01:10:00Z', last_scanned_at: '2026-09-05T03:42:00Z',
     title: '고요한 아침의 나라에서 보낸 열두 달',
     author: '김서연', translator: null, publisher: '한빛출판',
-    cover_url: null,
+    cover_url: cover('#334155'),
     price_standard: 18000, price_sales: 16200,
     used_price: 9500, used_min_price: 7800, used_count: 14,
     meta_fetched_at: '2026-09-05T01:10:05Z',
@@ -36,7 +47,7 @@ const SAMPLE_BOOKS = [
     first_scanned_at: '2026-09-05T02:05:00Z', last_scanned_at: '2026-09-05T02:05:00Z',
     title: '자료구조',
     author: '박민준', translator: '이하늘', publisher: '초록책방',
-    cover_url: null,
+    cover_url: cover('#7c2d12'),
     price_standard: 32000, price_sales: 28800,
     used_price: 21000, used_min_price: 18500, used_count: 3,
     meta_fetched_at: '2026-09-05T02:05:04Z',
@@ -46,7 +57,7 @@ const SAMPLE_BOOKS = [
     first_scanned_at: '2026-09-04T22:31:00Z', last_scanned_at: '2026-09-05T03:50:00Z',
     title: '바다와 등대 그리고 오래된 편지들에 관한 아주 긴 제목의 산문집',
     author: '최지우', translator: null, publisher: '푸른모래',
-    cover_url: null,
+    cover_url: cover('#134e4a'),
     price_standard: 15500, price_sales: 13950,
     used_price: null, used_min_price: null, used_count: null,
     meta_fetched_at: '2026-09-04T22:31:06Z',
@@ -218,6 +229,11 @@ try {
   await deskPage.goto(BASE, { waitUntil: 'networkidle' });
   await settle(deskPage);
   await shoot(deskPage, 'd1-홈');
+
+  // 도서 표는 열이 많다. 넓은 화면에서 폭이 어떻게 나뉘는지 눈으로 봐야 한다.
+  await deskPage.goto(BASE + '/books', { waitUntil: 'networkidle' });
+  await settle(deskPage);
+  await shoot(deskPage, 'd2-도서');
   await desk.close();
 
   console.log('완료');

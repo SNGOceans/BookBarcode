@@ -26,6 +26,12 @@ function Won({ n }: { n: number | null | undefined }) {
   return <>{n.toLocaleString('ko-KR')}</>;
 }
 
+/**
+ * 값이 없는 칸에 표식을 남긴다. 좁은 화면(카드)에서는 CSS 가 이 표식을 보고 칸을 숨긴다.
+ * 넓은 화면(표)에서는 열을 맞춰야 하므로 그대로 두고 줄표를 보인다.
+ */
+const empty = (v: unknown) => (v == null ? '' : undefined);
+
 type Filter = 'all' | 'found' | 'missing';
 
 export default function BooksPage() {
@@ -96,16 +102,20 @@ export default function BooksPage() {
         </div>
       ) : (
         <div className="pane-scroll">
-          <table className="dtable">
+          <table className="dtable with-cover">
             <thead>
               <tr>
+                <th className="c-cover" aria-label="표지" />
                 <th className="c-title">제목</th>
                 <th className="c-state">상태</th>
-                <th>저자 · 출판사</th>
+                <th className="c-people">저자 · 옮긴이 · 출판사</th>
                 <th className="num">정가</th>
+                <th className="num">판매가</th>
                 <th className="num">중고가</th>
+                <th className="num">중고최저</th>
+                <th className="num">중고수량</th>
                 <th className="num">스캔</th>
-                <th className="c-when">최근</th>
+                <th className="c-when">최근 스캔</th>
                 <th className="c-act" aria-label="동작" />
               </tr>
             </thead>
@@ -113,8 +123,18 @@ export default function BooksPage() {
               {rows.map((b) => {
                 const state = lookupState(b);
                 const ok = state === '찾음';
+                const people = [b.author, b.translator && `${b.translator} 옮김`, b.publisher]
+                  .filter(Boolean).join(' · ');
                 return (
                   <tr key={b.id} className={ok ? '' : 'row-untitled'}>
+                    <td className="c-cover">
+                      <div className="thumb" aria-hidden="true">
+                        {b.cover_url
+                          // eslint-disable-next-line @next/next/no-img-element
+                          ? <img src={b.cover_url} alt="" loading="lazy" referrerPolicy="no-referrer" />
+                          : <span>{b.isbn.slice(-3)}</span>}
+                      </div>
+                    </td>
                     <td className="c-title" data-label="제목">
                       <span className="cell-title">{b.title ?? '제목 미확인'}</span>
                       <span className="cell-isbn mono">{b.isbn}</span>
@@ -124,11 +144,24 @@ export default function BooksPage() {
                         {ok ? '확인됨' : state}
                       </span>
                     </td>
-                    <td className="dim" data-label="저자 · 출판사">
-                      {[b.author, b.publisher].filter(Boolean).join(' · ') || '—'}
+                    <td className="c-people dim" data-label="저자" data-empty={empty(people || null)}>
+                      {people || '—'}
                     </td>
-                    <td className="num" data-label="정가"><Won n={b.price_standard} /></td>
-                    <td className="num used" data-label="중고가"><Won n={b.used_price ?? b.used_min_price} /></td>
+                    <td className="num" data-label="정가" data-empty={empty(b.price_standard)}>
+                      <Won n={b.price_standard} />
+                    </td>
+                    <td className="num" data-label="판매가" data-empty={empty(b.price_sales)}>
+                      <Won n={b.price_sales} />
+                    </td>
+                    <td className="num used" data-label="중고가" data-empty={empty(b.used_price)}>
+                      <Won n={b.used_price} />
+                    </td>
+                    <td className="num used" data-label="중고최저" data-empty={empty(b.used_min_price)}>
+                      <Won n={b.used_min_price} />
+                    </td>
+                    <td className="num" data-label="중고수량" data-empty={empty(b.used_count)}>
+                      {b.used_count == null ? <span className="none">—</span> : `${b.used_count}건`}
+                    </td>
                     <td className="num" data-label="스캔">{b.scan_count}</td>
                     <td className="c-when dim" data-label="최근">{formatDateTime(b.last_scanned_at)}</td>
                     <td className="c-act">

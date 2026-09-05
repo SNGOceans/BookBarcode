@@ -79,8 +79,14 @@ export default function AuthForm({ onAuthed }: Props) {
   }
 
   return (
-    <form className="auth-form" onSubmit={submit}>
-      <h2>{mode === 'signin' ? '로그인' : '회원가입'}</h2>
+    <>
+      <div className="auth-brand">
+        <Icon name="book" size={20} />
+        <span>Book Barcode</span>
+      </div>
+
+      <form className="auth-form" onSubmit={submit}>
+        <h2>{mode === 'signin' ? '로그인' : '회원가입'}</h2>
 
       {/* 페이지를 떠나 구글로 갔다 오는 흐름이라 form 제출이 아니라 링크다. */}
       <a className="auth-google" href="/api/auth/google">
@@ -112,7 +118,8 @@ export default function AuthForm({ onAuthed }: Props) {
         onClick={() => { setErr(null); setInfo(null); setMode((m) => m === 'signin' ? 'signup' : 'signin'); }}
       >
         {mode === 'signin' ? '계정이 없으신가요? 회원가입' : '이미 계정이 있으신가요? 로그인'}
-      </button>
-    </form>
+        </button>
+      </form>
+    </>
   );
 }

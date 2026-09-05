@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireUser } from '@/lib/supabase/server';
+import { isFound, lookupState } from '@/lib/book-meta';
 import ExcelJS from 'exceljs';
 
 export const runtime = 'nodejs';
@@ -43,17 +44,6 @@ const NUMERIC = [
   'used_count', 'price_sales', 'scan_count',
 ];
 const DATES = ['first_scanned_at', 'last_scanned_at'];
-
-/**
- * 알라딘 조회 상태.
- *
- * 「못 찾음」과 「아직 조회 안 함」은 다른 상태다. 하나로 뭉치면
- * 「알라딘에 없는 책」인지 「우리가 아직 안 물어본 책」인지 구분이 사라진다.
- */
-function lookupState(b: BookRow): '찾음' | '못 찾음' | '미조회' {
-  if (b.title) return '찾음';
-  return b.meta_fetched_at ? '못 찾음' : '미조회';
-}
 
 /** 도서 목록 시트 하나를 만든다. 두 탭이 같은 서식을 쓰도록 한 곳에 둔다. */
 function addBookSheet(
@@ -262,8 +252,8 @@ export async function GET(req: NextRequest) {
 
   // 오래된 것이 위로 오도록 뒤집는다(스캔한 순서대로 읽힌다).
   const all = ((data ?? []) as unknown as BookRow[]).slice().reverse();
-  const found   = all.filter((b) => lookupState(b) === '찾음');
-  const missing = all.filter((b) => lookupState(b) !== '찾음');
+  const found   = all.filter(isFound);
+  const missing = all.filter((b) => !isFound(b));
 
   const wb = new ExcelJS.Workbook();
   // 요약을 맨 앞에 둔다. 파일을 열면 먼저 보이는 것이 전체 그림이어야 한다.

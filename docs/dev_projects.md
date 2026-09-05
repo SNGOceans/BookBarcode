@@ -61,12 +61,25 @@
 
 ## 배포물 받는 법
 
+**main 에 커밋이 올라갈 때마다 `latest` 릴리스가 자동으로 갱신된다.**
+아래 주소는 바뀌지 않으므로 그대로 공유하면 된다.
+
+```
+https://github.com/SNGOceans/BookBarcode/releases/download/latest/BookReaderSetup.exe
+https://github.com/SNGOceans/BookBarcode/releases/download/latest/BookReader.apk
+```
+
 | 무엇 | 어디서 |
 |---|---|
 | 웹 | https://book-barcode.vercel.app (main push 시 자동) |
-| 안드로이드 APK | Actions → Android APK → 산출물 |
-| 윈도우 설치 파일 | Actions → Windows Setup → 산출물 (`BookReaderSetup.exe`) |
-| 릴리스로 묶기 | `git tag v1.0.0 && git push origin v1.0.0` — 둘 다 릴리스에 첨부된다 |
+| 최신 앱·설치본 | 위 고정 주소 또는 Releases → 「최신 빌드」 |
+| 버전 릴리스 | `git tag v1.0.0 && git push origin v1.0.0` |
+| 다른 주소로 굽기 | Actions → Release → Run workflow 에서 주소 입력(스테이징 확인용) |
+
+⚠️ 워크플로에 **경로 필터를 두지 않는다.** 한 push 트리거에 `branches`·`tags`·`paths`
+를 같이 두면 태그를 밀었을 때 필터에 걸려 워크플로가 통째로 건너뛴다.
+실패로도 안 잡혀 「왜 릴리스가 안 올라오지」만 남는다(2026-09-05 실측).
+대가로 문서만 고쳐도 빌드가 돈다 — 2분이라 감수한다.
 
 ---
 
